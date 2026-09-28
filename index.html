@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>APS Corriere Platform v0.6.1</title>
+  <title>APS Corriere Platform v0.7</title>
   <meta name="description" content="Piattaforma APS Corriere con gerarchia Super Master, Master e Cliente." />
-  <meta name="aps-backend-url" content="" />
+  <meta name="aps-backend-url" content="https://aps-api-production.up.railway.app" />
   <style>
 :root{
   --bg:#f4f7fb; --panel:#ffffff; --panel2:#f8fafc; --text:#172033; --muted:#6b7280;
@@ -81,6 +81,16 @@ textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:11px
 .api-pill.live{background:#e9f8f1;color:#17855c}
 @media(max-width:980px){.actions-cell{min-width:380px}.ship-action{font-size:10px;padding:7px 9px}}
 
+
+.dashboard-shipments{overflow-x:auto}
+.dashboard-shipments .data-table{min-width:1180px}
+.dashboard-shipments .actions-cell{position:sticky;right:0;background:var(--panel);z-index:2;box-shadow:-10px 0 18px rgba(18,31,53,.05)}
+.dashboard-shipments thead .actions-cell{background:var(--panel2)}
+.dashboard-recent-layout{display:grid;grid-template-columns:1fr;gap:18px}
+@media(max-width:900px){
+  .dashboard-shipments .data-table{min-width:1080px}
+}
+
 </style>
 </head>
 <body>
@@ -155,6 +165,20 @@ let state = loadState();
 let session = JSON.parse(localStorage.getItem('aps_session')||'null');
 let currentView='dashboard';
 let selectedTariffBuyer=null;
+let backendStatus={online:false,live:false,lastCheck:0};
+async function checkBackend(force=false){
+ const now=Date.now();
+ if(!force&&now-backendStatus.lastCheck<30000)return backendStatus;
+ backendStatus.lastCheck=now;
+ const base=apiBackendBase();
+ if(!base){backendStatus={online:false,live:false,lastCheck:now};return backendStatus}
+ try{
+   const r=await fetch(base+'/health',{cache:'no-store'});
+   const d=await r.json();
+   backendStatus={online:r.ok&&d.ok===true,live:r.ok&&d.live===true,lastCheck:now};
+ }catch(e){backendStatus={online:false,live:false,lastCheck:now}}
+ return backendStatus;
+}
 
 function loadState(){
   const saved=localStorage.getItem('aps_state_v1');
@@ -235,7 +259,7 @@ function dashboardPage(){const u=me(),ships=visibleShipments(u),clients=visibleC
  ${kpi(u.role==='super'?'Master attivi':u.role==='master'?'Clienti attivi':'Consegnate',u.role==='super'?visibleMasters().length:u.role==='master'?clients.length:delivered,'◉',u.role==='client'?`${Math.round((delivered/Math.max(ships.length,1))*100)}% consegnate`:'Rete operativa')}
  ${kpi('Credito disponibile',money(u.balance),'◫','Disponibile ora')}
 </div>
-<div class="grid-2"><div class="panel"><div class="panel-head"><h3>Spedizioni recenti</h3><button class="btn btn-secondary" data-view="shipments">Vedi tutte</button></div><div class="table-wrap">${shipTable(ships.slice(0,6))}</div></div><div class="panel"><div class="panel-head"><h3>${u.role==='client'?'Andamento spedizioni':'Performance rete'}</h3><span class="tag blue">Ultimi 7 gg</span></div><div class="panel-body"><div class="chart">${[4,7,5,9,11,8,13].map((x,i)=>`<div class="bar-wrap"><div class="bar" style="height:${x*10}px" data-value="${x} sped."></div><span>${['Lun','Mar','Mer','Gio','Ven','Sab','Dom'][i]}</span></div>`).join('')}</div></div></div></div>
+<div class="panel"><div class="panel-head"><h3>Spedizioni recenti</h3><button class="btn btn-secondary" data-view="shipments">Vedi tutte</button></div><div class="table-wrap dashboard-shipments">${shipTable(ships.slice(0,6))}</div></div><div style="height:18px"></div><div class="panel"><div class="panel-head"><h3>${u.role==='client'?'Andamento spedizioni':'Performance rete'}</h3><span class="tag blue">Ultimi 7 gg</span></div><div class="panel-body"><div class="chart">${[4,7,5,9,11,8,13].map((x,i)=>`<div class="bar-wrap"><div class="bar" style="height:${x*10}px" data-value="${x} sped."></div><span>${['Lun','Mar','Mer','Gio','Ven','Sab','Dom'][i]}</span></div>`).join('')}</div></div></div>
 <div style="height:18px"></div><div class="grid-2-equal"><div class="panel"><div class="panel-head"><h3>Stati operativi</h3></div><div class="panel-body"><div class="list">${['Consegnata','In transito','In consegna','Giacenza'].map(s=>`<div class="list-row"><span class="status ${statusClass(s)}">${s}</span><div class="grow"></div><strong>${ships.filter(x=>x.status===s).length}</strong></div>`).join('')}</div></div></div><div class="panel"><div class="panel-head"><h3>Ultimi movimenti</h3></div><div class="panel-body"><div class="list">${visibleTransactions().slice(0,5).map(t=>`<div class="list-row"><div class="circle">€</div><div class="grow"><strong>${t.type}</strong><span>${t.note} · ${dateFmt(t.date)}</span></div><div class="money ${t.amount>=0?'positive':'negative'}">${t.amount>=0?'+':''}${money(t.amount)}</div></div>`).join('')||'<div class="empty">Nessun movimento</div>'}</div></div></div></div>`}
 function kpi(label,value,ico,foot){return `<div class="kpi"><div class="kpi-top"><span class="kpi-label">${label}</span><span class="kpi-icon">${ico}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`}
 
@@ -565,8 +589,16 @@ function pickupsPage(){const rows=visiblePickups();return `${pageHead('Ritiri pr
 function visibleHolds(){const ids=descendants(me());return (state.holds||[]).filter(x=>ids.includes(x.clientId))}
 function holdsPage(){const rows=visibleHolds();return `${pageHead('Giacenze e resi','Gestisci anomalie, riconsegne e rientri al mittente.')}${rows.length?`<div class="cards">${rows.map(h=>{const sh=state.shipments.find(s=>s.id===h.shipment);return `<div class="entity-card"><div class="entity-top"><div class="circle">↺</div><div><h4>${h.shipment}</h4><p>${sh?.recipient||'-'} · ${sh?.city||'-'} · ${h.reason}</p></div></div><div class="entity-meta"><div class="meta-box"><span>Data</span><strong>${dateFmt(h.date)}</strong></div><div class="meta-box"><span>Stato</span><strong>${h.status}</strong></div></div><div class="entity-actions">${h.action?`<span class="tag blue">${h.action}</span>`:`<button class="btn btn-soft holdAction" data-id="${h.id}" data-action="Riconsegna">Riconsegna</button><button class="btn btn-secondary holdAction" data-id="${h.id}" data-action="Reso al mittente">Reso</button>`}</div></div>`}).join('')}</div>`:`<div class="panel"><div class="panel-body"><div class="empty"><strong>Nessuna giacenza</strong>Non ci sono anomalie da gestire nel tuo perimetro.</div></div></div>`}`}
 
-function providersPage(){if(me().role!=='super')return dashboardPage();const rows=state.providers||[];return `${pageHead('Provider e API','Connessioni corriere predisposte per integrazione server-side con MoovExpress.')}<div class="notice"><strong>Integrazione reale:</strong> ogni contratto/corriere userà la propria API key custodita nel backend, mai nel browser. Quando il backend sarà collegato, creazione spedizione, tracking, etichetta, annullamento e credito provider saranno sincronizzati automaticamente.</div><div class="cards">${rows.map(p=>`<div class="entity-card"><div class="entity-top"><div class="carrier-logo">${p.code}</div><div><h4>${p.name}</h4><p>Modalità ${p.mode} · ${p.status}</p></div></div><div class="entity-meta"><div class="meta-box"><span>Codice</span><strong>${p.code}</strong></div><div class="meta-box"><span>Stato demo</span><strong>${p.enabled?'Attivo':'Disattivo'}</strong></div></div><div class="entity-actions"><button class="btn ${p.enabled?'btn-danger':'btn-soft'} providerToggle" data-id="${p.id}">${p.enabled?'Disattiva':'Attiva'}</button></div></div>`).join('')}</div>`}
-
+function providersPage(){
+ if(me().role!=='super')return dashboardPage();
+ const rows=state.providers||[];
+ setTimeout(async()=>{const h=await checkBackend(true);const el=document.getElementById('backendState');if(el)el.innerHTML=h.online?(h.live?'<strong style="color:#17855c">● Backend online · API LIVE</strong>':'<strong style="color:#b76e00">● Backend online · LIVE disattivato per sicurezza</strong>'):'<strong style="color:#c43d3d">● Backend non raggiungibile</strong>'},0);
+ return `${pageHead('Provider e API','MoovExpress collegato tramite backend APS.','<button class="btn btn-primary" id="syncProvidersBtn">Sincronizza provider</button>')}
+ <div class="notice" id="backendState">Controllo backend APS…</div>
+ <div class="cards">${rows.map(p=>`<div class="entity-card"><div class="entity-top"><div class="carrier-logo">${p.code}</div><div><h4>${p.contract||p.name}</h4><p>${p.apiConnected?'Collegato via API':`Modalità ${p.mode||'Demo'}`} · ${p.status}</p></div></div>
+ <div class="entity-meta"><div class="meta-box"><span>Codice</span><strong>${p.code}</strong></div><div class="meta-box"><span>Credito provider</span><strong>${p.apiConnected?money(p.credit||0):'—'}</strong></div><div class="meta-box"><span>Account</span><strong>${p.account||'—'}</strong></div></div>
+ <div class="entity-actions"><button class="btn ${p.enabled?'btn-danger':'btn-soft'} providerToggle" data-id="${p.id}">${p.enabled?'Disattiva':'Attiva'}</button></div></div>`).join('')}</div>`
+}
 function usersPage(){if(me().role!=='super')return dashboardPage();return `${pageHead('Utenti e permessi','Controllo degli account presenti nella gerarchia.') }<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Account</th><th>Ruolo</th><th>Parent</th><th>Credito</th><th>Stato</th><th>Azione</th></tr></thead><tbody>${state.users.map(u=>`<tr><td><strong>${u.company}</strong><div class="small muted">${u.email}</div></td><td><span class="tag blue">${roleLabel(u.role)}</span></td><td>${u.parentId?state.users.find(x=>x.id===u.parentId)?.company||'-':'—'}</td><td>${money(u.balance)}</td><td><span class="status ${u.active!==false?'ok':'danger'}">${u.active!==false?'Attivo':'Sospeso'}</span></td><td>${u.role==='super'?'<span class="small muted">Account principale</span>':`<button class="btn btn-secondary userToggle" data-id="${u.id}">${u.active!==false?'Sospendi':'Riattiva'}</button>`}</td></tr>`).join('')}</tbody></table></div></div>`}
 
 function trackingPage(){return `${pageHead('Tracking','Cerca una spedizione con il numero APS o il codice tracking.')}
@@ -596,7 +628,10 @@ function bindPage(){
  if(currentView==='credit') {document.getElementById('rechargeBtn')?.addEventListener('click',rechargeDemo);document.getElementById('creditManageBtn')?.addEventListener('click',openCreditModal)}
  if(currentView==='pickups') document.getElementById('addPickupBtn')?.addEventListener('click',openPickupModal);
  if(currentView==='holds') document.querySelectorAll('.holdAction').forEach(b=>b.addEventListener('click',()=>manageHold(b.dataset.id,b.dataset.action)));
- if(currentView==='providers') document.querySelectorAll('.providerToggle').forEach(b=>b.addEventListener('click',()=>toggleProvider(b.dataset.id)));
+ if(currentView==='providers'){
+   document.querySelectorAll('.providerToggle').forEach(b=>b.addEventListener('click',()=>toggleProvider(b.dataset.id)));
+   document.getElementById('syncProvidersBtn')?.addEventListener('click',async()=>{await syncProviderAccounts(false);render()});
+ }
  if(currentView==='users') document.querySelectorAll('.userToggle').forEach(b=>b.addEventListener('click',()=>toggleUser(b.dataset.id)));
  if(currentView==='tracking') document.getElementById('trackingBtn')?.addEventListener('click',doTracking);
  if(currentView==='reports') document.getElementById('exportCsv')?.addEventListener('click',exportCSV);
@@ -613,6 +648,69 @@ function bindTariffs(){
    inputs.forEach(inp=>{const carrier=inp.dataset.carrier,price=+Number(inp.value).toFixed(2);let rec=tariffRecord(u.id,buyer.id,carrier);if(rec)rec.price=price;else state.tariffs.push({sellerId:u.id,buyerId:buyer.id,carrier,price})});
    save();toast('Listino salvato per '+buyer.company);render();
  });
+}
+
+function moovPayloadFromForm(){
+ const parcels=Math.max(1,+qParcels.value||1);
+ const totalWeight=Math.max(.1,+qWeight.value||.1);
+ const perPackage=+(totalWeight/parcels).toFixed(3);
+ const packages=Array.from({length:parcels},()=>({
+   weight:perPackage,
+   length:Math.max(1,+qLength.value||1),
+   width:Math.max(1,+qWidth.value||1),
+   height:Math.max(1,+qHeight.value||1)
+ }));
+ return {
+   packages,
+   shipFrom:{
+     name:qSenderName.value.trim(),street1:qSenderAddress.value.trim(),city:qSenderCity.value.trim(),
+     state:qSenderProvince.value.trim().toUpperCase(),postalCode:qSenderZip.value.trim(),country:'IT',
+     phone:qSenderPhone.value.trim(),email:qSenderEmail.value.trim()
+   },
+   shipTo:{
+     name:qRecipient.value.trim(),street1:qAddress.value.trim(),city:qCity.value.trim(),
+     state:qProvince.value.trim().toUpperCase(),postalCode:qZip.value.trim(),country:'IT',
+     phone:qPhone.value.trim(),email:qEmail.value.trim()
+   },
+   contenuto:qContent.value.trim()||undefined,
+   notes:qNotes.value.trim()||undefined,
+   reference:qReference.value.trim()||undefined,
+   codValue:(+qCod.value||0)>0?(+qCod.value||0):undefined
+ };
+}
+function moovStatusToLocal(s=''){
+ const v=String(s).toLowerCase();
+ if(v.includes('consegn'))return'Consegnata';
+ if(v.includes('giac')||v.includes('exception')||v.includes('non_consegn'))return'Giacenza';
+ if(v.includes('annull'))return'Annullata';
+ if(v.includes('in_consegna')||v.includes('out_for_delivery'))return'In consegna';
+ if(v.includes('transit')||v.includes('transito'))return'In transito';
+ return'Presa in carico';
+}
+async function apiJson(path,opts={}){
+ const base=apiBackendBase();
+ if(!base)throw new Error('Backend APS non configurato');
+ const r=await fetch(base+path,{...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}});
+ const d=await r.json().catch(()=>({}));
+ if(!r.ok)throw new Error(d.error||d.message||`Errore ${r.status}`);
+ return d;
+}
+async function syncProviderAccounts(silent=false){
+ const h=await checkBackend(true);
+ if(!h.online){if(!silent)toast('Backend APS non raggiungibile','error');return false}
+ if(!h.live){if(!silent)toast('Backend online: integrazione live ancora disattivata','error');return false}
+ let ok=0;
+ for(const p of (state.providers||[]).filter(x=>x.enabled)){
+   try{
+     const d=await apiJson(`/api/account/${encodeURIComponent(p.code)}`);
+     p.mode='API'; p.apiConnected=true; p.status=d.contratto_attivo===false?'Contratto non attivo':'Online';
+     p.credit=Number(d.credito??0); p.currency=d.valuta||'EUR'; p.contract=d.contratto||p.name; p.account=d.account||'';
+     ok++;
+   }catch(e){p.apiConnected=false;p.status='API non disponibile'}
+ }
+ save();
+ if(!silent)toast(`Provider sincronizzati: ${ok}`);
+ return ok>0;
 }
 function quoteEconomics(owner,carrier,weight,cod,insurance){
  const meta=carrierCatalog[carrier],providerCost=+(meta.base+weight*.46*meta.coef+(cod>0?1.1:0)+insurance).toFixed(2);
@@ -640,86 +738,97 @@ function bindQuote(){
  ['qParcels','qWeight','qLength','qWidth','qHeight'].forEach(id=>document.getElementById(id)?.addEventListener('input',updateWeight));
  updateWeight();
 
- form.onsubmit=e=>{
+ form.onsubmit=async e=>{
    e.preventDefault();
    const weights=updateWeight(),cod=+qCod.value,ins=+qInsurance.value;
    if(!/^\d{5}$/.test(qSenderZip.value.trim())||!/^\d{5}$/.test(qZip.value.trim())){toast('CAP non valido: inserisci 5 cifre','error');return}
    if(qSenderProvince.value.trim().length!==2||qProvince.value.trim().length!==2){toast('Provincia: usa la sigla di 2 lettere','error');return}
-
    const owner=me().role==='client'?me():state.users.find(x=>x.id===qOwner.value);
    if(!owner){toast('Seleziona un cliente valido','error');return}
 
-   const enabled=new Set((state.providers||[]).filter(p=>p.enabled).map(p=>p.code));
-   const carriers=Object.keys(carrierCatalog).filter(c=>enabled.has(c));
-   const quotes=carriers
-     .map(name=>({name,...quoteEconomics(owner,name,weights.chargeable,cod,ins),chargeableWeight:weights.chargeable,volumetricWeight:weights.volumetric}))
-     .map(x=>({...x,cost:x.providerCost,price:x.clientPrice}));
+   const carriers=(state.providers||[]).filter(p=>p.enabled).map(p=>p.code).filter(c=>carrierCatalog[c]);
+   const h=await checkBackend(true);
+   let quotes=[];
+
+   if(h.online&&h.live){
+     document.getElementById('quotes').innerHTML='<div class="notice">Calcolo tariffe reali MoovExpress…</div>';
+     for(const name of carriers){
+       try{
+         const payload=moovPayloadFromForm();
+         const d=await apiJson(`/api/rates/${encodeURIComponent(name)}`,{method:'POST',body:JSON.stringify({packages:payload.packages,shipTo:payload.shipTo,codValue:payload.codValue})});
+         const providerCost=Number(d.prezzo??d.price??d.totale);
+         if(!Number.isFinite(providerCost))continue;
+         const master=state.users.find(x=>x.id===owner.parentId);
+         const masterBase=tariffPrice('u-sm',master?.id,name,providerCost*1.15);
+         const clientBase=tariffPrice(master?.id,owner.id,name,masterBase*1.20);
+         const masterCost=+Math.max(providerCost,masterBase).toFixed(2);
+         const clientPrice=+Math.max(masterCost,clientBase).toFixed(2);
+         quotes.push({name,apiLive:true,contract:d.contratto||name,providerCost:+providerCost.toFixed(2),masterCost,clientPrice,
+           superMargin:+(masterCost-providerCost).toFixed(2),masterMargin:+(clientPrice-masterCost).toFixed(2),
+           chargeableWeight:weights.chargeable,volumetricWeight:weights.volumetric});
+       }catch(err){console.warn(name,err)}
+     }
+   }
+
+   if(!quotes.length){
+     quotes=carriers.map(name=>({name,apiLive:false,...quoteEconomics(owner,name,weights.chargeable,cod,ins),
+       chargeableWeight:weights.chargeable,volumetricWeight:weights.volumetric}));
+   }
 
    document.getElementById('quotes').innerHTML=quotes.map((q,i)=>`<div class="quote">
      <div class="carrier-logo">${q.name}</div>
-     <div class="details"><strong>${q.name} Standard</strong><span>Consegna stimata 1–2 giorni lavorativi · peso tariffabile ${q.chargeableWeight.toFixed(2)} kg</span>
+     <div class="details"><strong>${q.contract||q.name+' Standard'}</strong>
+     <span>${q.apiLive?'Tariffa reale MoovExpress':'Tariffa demo locale'} · peso tariffabile ${q.chargeableWeight.toFixed(2)} kg</span>
      ${me().role==='super'?`<span>Margine APS ${money(q.superMargin)} · margine Master ${money(q.masterMargin)}</span>`:me().role==='master'?`<span>Tuo costo ${money(q.masterCost)} · tuo margine ${money(q.masterMargin)}</span>`:''}</div>
      <div class="price"><strong>${money(q.clientPrice)}</strong><span>prezzo Cliente · IVA esclusa</span></div>
-     <button class="btn btn-primary chooseQuote" data-i="${i}">Scegli</button>
-   </div>`).join('')||'<div class="notice">Nessun provider attivo. Il Super Master deve attivare almeno un corriere.</div>';
-
+     <button class="btn btn-primary chooseQuote" data-i="${i}">${q.apiLive?'Crea spedizione reale':'Crea demo'}</button>
+   </div>`).join('')||'<div class="notice">Nessun provider disponibile.</div>';
    document.querySelectorAll('.chooseQuote').forEach(b=>b.onclick=()=>createShipment(quotes[+b.dataset.i]));
  };
 }
 
-function createShipment(q){
+async function createShipment(q){
  const u=me(),owner=u.role==='client'?u:state.users.find(x=>x.id===document.getElementById('qOwner')?.value);
  if(!owner){toast('Seleziona un cliente valido','error');return}
  if(owner.balance<q.clientPrice){toast('Credito cliente insufficiente','error');return}
-
- const num='APS'+new Date().getFullYear().toString().slice(2)+String(state.shipments.length+1).padStart(4,'0');
+ const localNum='APS'+new Date().getFullYear().toString().slice(2)+String(state.shipments.length+1).padStart(4,'0');
  const master=state.users.find(x=>x.id===owner.parentId);
-
- const parcels=Math.max(1,+qParcels.value||1);
- const realWeight=Math.max(.1,+qWeight.value||.1);
+ const parcels=Math.max(1,+qParcels.value||1),realWeight=Math.max(.1,+qWeight.value||.1);
  const l=Math.max(1,+qLength.value||1),w=Math.max(1,+qWidth.value||1),h=Math.max(1,+qHeight.value||1);
- const volumetricWeight=+(l*w*h/5000*parcels).toFixed(2);
- const chargeableWeight=Math.max(realWeight,volumetricWeight);
+ const volumetricWeight=+(l*w*h/5000*parcels).toFixed(2),chargeableWeight=Math.max(realWeight,volumetricWeight);
+
+ let ext=null;
+ if(q.apiLive){
+   try{
+     toast('Invio a MoovExpress…');
+     ext=await apiJson(`/api/shipments/${encodeURIComponent(q.name)}`,{method:'POST',body:JSON.stringify(moovPayloadFromForm())});
+   }catch(e){toast(e.message||'Creazione API non riuscita','error');return}
+ }
+
+ const externalId=ext?(ext.id??ext.shipment_id??ext.spedizione_id):null;
+ const tracking=ext?(ext.tracking??ext.tracking_number??ext.numero_tracking):q.name+localNum;
+ const providerCost=ext?Number(ext.prezzo??ext.price??q.providerCost):q.providerCost;
+ const status=ext?moovStatusToLocal(ext.stato??ext.status):'Presa in carico';
 
  const s={
-   id:num,ownerId:owner.id,masterId:master?.id||null,
-   sender:{
-     name:qSenderName.value.trim(),
-     contact:qSenderContact.value.trim(),
-     address:qSenderAddress.value.trim(),
-     zip:qSenderZip.value.trim(),
-     city:qSenderCity.value.trim(),
-     province:qSenderProvince.value.trim().toUpperCase(),
-     phone:qSenderPhone.value.trim(),
-     email:qSenderEmail.value.trim()
-   },
-   recipient:qRecipient.value.trim(),
-   recipientContact:qRecipientContact.value.trim(),
-   address:qAddress.value.trim(),
-   zip:qZip.value.trim(),
-   city:qCity.value.trim(),
-   province:qProvince.value.trim().toUpperCase(),
-   phone:qPhone.value.trim(),
-   email:qEmail.value.trim(),
+   id:localNum,ownerId:owner.id,masterId:master?.id||null,
+   sender:{name:qSenderName.value.trim(),contact:qSenderContact.value.trim(),address:qSenderAddress.value.trim(),zip:qSenderZip.value.trim(),city:qSenderCity.value.trim(),province:qSenderProvince.value.trim().toUpperCase(),phone:qSenderPhone.value.trim(),email:qSenderEmail.value.trim()},
+   recipient:qRecipient.value.trim(),recipientContact:qRecipientContact.value.trim(),address:qAddress.value.trim(),zip:qZip.value.trim(),city:qCity.value.trim(),province:qProvince.value.trim().toUpperCase(),phone:qPhone.value.trim(),email:qEmail.value.trim(),
    parcels,weight:realWeight,length:l,width:w,height:h,volumetricWeight,chargeableWeight,
-   content:qContent.value.trim(),
-   reference:qReference.value.trim(),
-   notes:qNotes.value.trim(),
-   goodsValue:+qGoodsValue.value||0,
-   carrier:q.name,status:'Presa in carico',
-   providerCost:q.providerCost,masterCost:q.masterCost,clientPrice:q.clientPrice,price:q.clientPrice,cost:q.providerCost,
-   cod:+qCod.value,
-   insurance:+qInsurance.value>0,
-   created:new Date().toISOString().slice(0,10),
-   tracking:q.name+num,
-   events:[{status:'Presa in carico',date:new Date().toISOString().slice(0,10),note:'Spedizione creata sulla piattaforma'}]
+   content:qContent.value.trim(),reference:qReference.value.trim(),notes:qNotes.value.trim(),goodsValue:+qGoodsValue.value||0,
+   carrier:q.name,status,providerCost:+providerCost.toFixed(2),masterCost:q.masterCost,clientPrice:q.clientPrice,price:q.clientPrice,cost:+providerCost.toFixed(2),
+   cod:+qCod.value,insurance:+qInsurance.value>0,created:new Date().toISOString().slice(0,10),tracking,
+   externalId,providerShipmentId:externalId,labelUrl:ext?.label_url||null,apiLinked:!!externalId,
+   events:[{status,date:new Date().toISOString().slice(0,10),note:ext?'Spedizione creata tramite API MoovExpress':'Spedizione demo creata sulla piattaforma'}]
  };
-
  state.shipments.unshift(s);
  owner.balance=+(owner.balance-q.clientPrice).toFixed(2);
- state.transactions.unshift({id:uid('T'),userId:owner.id,type:'Spedizione',amount:-q.clientPrice,date:s.created,note:num});
- if(s.cod>0)state.cod.unshift({id:uid('COD'),clientId:owner.id,amount:s.cod,status:'In attesa',date:s.created,shipment:num});
- save();toast('Spedizione creata: '+num);currentView='shipments';render();
+ state.transactions.unshift({id:uid('T'),userId:owner.id,type:'Spedizione',amount:-q.clientPrice,date:s.created,note:localNum});
+ if(s.cod>0)state.cod.unshift({id:uid('COD'),clientId:owner.id,amount:s.cod,status:'In attesa',date:s.created,shipment:localNum});
+ save();
+ if(ext){await syncProviderAccounts(true).catch(()=>{});toast(`Spedizione reale creata: ${tracking}`)}
+ else toast('Spedizione demo creata: '+localNum);
+ currentView='shipments';render();
 }
 
 function openUserModal(role){const parentOptions=role==='client'&&me().role==='super'?visibleMasters().map(m=>`<option value="${m.id}">${m.company}</option>`).join(''):'';const html=`<div class="modal-backdrop" id="modalBg"><div class="modal"><div class="modal-head"><h3>Nuovo ${roleLabel(role)}</h3><button class="modal-close" id="modalClose">×</button></div><form id="userCreate"><div class="modal-body"><div class="form-grid"><div class="field"><label>Nome e cognome</label><input id="nuName" required></div><div class="field"><label>Azienda</label><input id="nuCompany" required></div><div class="field"><label>Email</label><input id="nuEmail" type="email" required></div><div class="field"><label>Credito iniziale</label><input id="nuBalance" type="number" min="0" value="0"></div>${parentOptions?`<div class="field full"><label>Master di appartenenza</label><select id="nuParent">${parentOptions}</select></div>`:''}</div></div><div class="modal-foot"><button type="button" class="btn btn-secondary" id="modalCancel">Annulla</button><button class="btn btn-primary">Crea account</button></div></form></div></div>`;document.body.insertAdjacentHTML('beforeend',html);const close=()=>document.getElementById('modalBg')?.remove();modalClose.onclick=close;modalCancel.onclick=close;userCreate.onsubmit=e=>{e.preventDefault();const id=uid(role==='master'?'m':'c');const parentId=role==='master'?'u-sm':me().role==='master'?me().id:nuParent.value;state.users.push({id,name:nuName.value,company:nuCompany.value,email:nuEmail.value,password:'demo',role,balance:+nuBalance.value,parentId,active:true});Object.keys(carrierCatalog).forEach(c=>{const base=carrierCatalog[c].base;if(role==='master')state.tariffs.push({sellerId:'u-sm',buyerId:id,carrier:c,price:+(base*1.15).toFixed(2)});else{const masterCost=tariffPrice('u-sm',parentId,c,base*1.15);state.tariffs.push({sellerId:parentId,buyerId:id,carrier:c,price:+(masterCost*1.20).toFixed(2)})}});save();close();toast(roleLabel(role)+' creato');render()}}
@@ -732,18 +841,28 @@ function toggleProvider(id){const p=state.providers.find(x=>x.id===id);if(!p)ret
 function toggleUser(id){const u=state.users.find(x=>x.id===id);if(!u||u.role==='super')return;u.active=u.active===false;save();toast(u.company+' '+(u.active?'riattivato':'sospeso'));render()}
 
 function rechargeDemo(){const u=me();u.balance=+(u.balance+100).toFixed(2);state.transactions.unshift({id:uid('T'),userId:u.id,type:'Ricarica',amount:100,date:new Date().toISOString().slice(0,10),note:'Ricarica demo'});save();toast('Ricarica demo di €100 effettuata');render()}
-function doTracking(){
+async function doTracking(){
  const q=trackingInput.value.trim().toLowerCase();
- const s=visibleShipments().find(x=>x.id.toLowerCase()===q||x.tracking.toLowerCase()===q);
+ const s=visibleShipments().find(x=>x.id.toLowerCase()===q||String(x.tracking||'').toLowerCase()===q);
  const r=document.getElementById('trackingResult');
  if(!s){r.innerHTML=`<div class="notice" style="margin-top:16px">Spedizione non trovata nel tuo perimetro.</div>`;return}
- r.innerHTML=`<div style="margin-top:22px"><div class="entity-card">
-   <div class="entity-top"><div class="carrier-logo">${esc(s.carrier)}</div><div><h4>${esc(s.id)}</h4><p>${esc(s.recipient)} · ${esc(s.city)} · ${esc(s.tracking)}</p></div></div>
-   <div class="action-stack" style="margin-top:14px"><span class="status ${statusClass(s.status)}">${esc(s.status)}</span><button class="btn btn-secondary" onclick="openShipmentDetail('${esc(s.id)}')">Apri dettagli</button><button class="btn btn-secondary" onclick="printShippingLabel('${esc(s.id)}')">Scarica etichetta PDF</button></div>
-   <div style="margin-top:20px">${eventTimelineHtml(s)}</div>
-   ${s.status==='Giacenza'?'<div class="notice">La spedizione risulta in giacenza. Usa la sezione “Giacenze e resi” per gestirla.</div>':''}
- </div></div>`;
+ if(shipmentApiLinked(s)){
+   const h=await checkBackend(true);
+   if(h.online&&h.live){
+     try{
+       const d=await apiJson(`/api/tracking/${encodeURIComponent(s.carrier)}/${encodeURIComponent(s.tracking)}`);
+       s.status=moovStatusToLocal(d.status??d.stato??s.status);
+       const events=d.events||d.eventi;
+       if(Array.isArray(events))s.events=events.map(x=>({status:moovStatusToLocal(x.status??x.stato??''),date:String(x.date||x.data||x.timestamp||new Date().toISOString()).slice(0,10),note:x.description||x.descrizione||x.location||x.localita||'Evento MoovExpress'}));
+       save();
+     }catch(e){console.warn(e)}
+   }
+ }
+ r.innerHTML=`<div style="margin-top:22px"><div class="entity-card"><div class="entity-top"><div class="carrier-logo">${esc(s.carrier)}</div><div><h4>${esc(s.id)}</h4><p>${esc(s.recipient)} · ${esc(s.city)} · ${esc(s.tracking)}</p></div></div>
+ <div class="action-stack" style="margin-top:14px"><span class="status ${statusClass(s.status)}">${esc(s.status)}</span><button class="btn btn-secondary" onclick="openShipmentDetail('${esc(s.id)}')">Apri dettagli</button><button class="btn btn-secondary" onclick="printShippingLabel('${esc(s.id)}')">Scarica etichetta PDF</button></div>
+ <div style="margin-top:20px">${eventTimelineHtml(s)}</div></div></div>`;
 }
+
 function exportCSV(){const rows=visibleShipments();const csv=['Numero,Destinatario,Indirizzo,CAP,Citta,Provincia,Telefono,Email,Colli,PesoReale,PesoVolumetrico,PesoTariffabile,Contenuto,Riferimento,Corriere,Stato,Prezzo,Costo,Tracking',...rows.map(s=>[s.id,s.recipient,s.address||'',s.zip||'',s.city,s.province||'',s.phone||'',s.email||'',s.parcels||1,s.weight||'',s.volumetricWeight||'',s.chargeableWeight||s.weight||'',s.content||'',s.reference||'',s.carrier,s.status,s.price,s.cost,s.tracking].map(v=>`"${String(v).replaceAll('"','""')}"`).join(','))].join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='aps-corriere-spedizioni.csv';a.click();URL.revokeObjectURL(url);toast('CSV esportato')}
 function exportEconomicCSV(){const u=me(),rows=visibleShipments(u);const csv=['Spedizione,Data,Cliente,Corriere,Vendita,Costo,Margine',...rows.map(s=>{const e=shipmentEconomics(s,u),cl=state.users.find(x=>x.id===s.ownerId);return [s.id,s.created,cl?.company||'',s.carrier,e.sale,e.cost,e.margin].map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')})].join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='aps-corriere-margini.csv';a.click();URL.revokeObjectURL(url);toast('Report margini esportato')}
 function saveSettings(e){e.preventDefault();state.settings.brand=setBrand.value;state.settings.email=setEmail.value;state.settings.primary=setColor.value;save();document.documentElement.style.setProperty('--brand',setColor.value);toast('Impostazioni salvate')}
