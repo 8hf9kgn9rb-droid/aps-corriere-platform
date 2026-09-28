@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>APS Corriere Platform v0.5</title>
+  <title>APS Corriere Platform v0.6</title>
   <meta name="description" content="Piattaforma APS Corriere con gerarchia Super Master, Master e Cliente." />
+  <meta name="aps-backend-url" content="" />
   <style>
 :root{
   --bg:#f4f7fb; --panel:#ffffff; --panel2:#f8fafc; --text:#172033; --muted:#6b7280;
@@ -68,6 +69,17 @@ textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:11px
 .label-preview{border:2px dashed #b8c6db;border-radius:14px;padding:16px;background:#fff}
 .label-preview .barcode{height:42px;background:repeating-linear-gradient(90deg,#111 0 2px,transparent 2px 5px,#111 5px 6px,transparent 6px 10px);margin:12px 0}
 @media(max-width:760px){.detail-grid{grid-template-columns:1fr}}
+
+
+.actions-cell{min-width:520px}
+.ship-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ship-action{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:#fff;color:var(--text);padding:8px 11px;border-radius:10px;font-weight:800;font-size:11px;white-space:nowrap}
+.ship-action:hover{border-color:#b7c7df;background:#f8fbff}
+.ship-action.primary{color:var(--brand);border-color:#bfd2ff;background:var(--brandSoft)}
+.ship-action.danger{color:var(--danger);border-color:#fecaca;background:var(--dangerSoft)}
+.api-pill{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;padding:5px 8px;border-radius:999px;background:#eef2f7;color:#526174}
+.api-pill.live{background:#e9f8f1;color:#17855c}
+@media(max-width:980px){.actions-cell{min-width:380px}.ship-action{font-size:10px;padding:7px 9px}}
 
 </style>
 </head>
@@ -316,6 +328,13 @@ function openShipmentDetail(id){
 }
 function printShippingLabel(id){
  const s=visibleShipments().find(x=>x.id===id)||state.shipments.find(x=>x.id===id); if(!s)return;
+ const base=apiBackendBase();
+ if(shipmentApiLinked(s)){
+   if(!base){toast('Backend API non ancora configurato: etichetta reale non disponibile','error');return}
+   const ext=shipmentExternalId(s);
+   window.open(`${base}/api/moov/shipments/${encodeURIComponent(s.carrier)}/${encodeURIComponent(ext)}/label`,'_blank');
+   return;
+ }
  const sender=s.sender||{},w=window.open('','_blank','width=760,height=900');
  if(!w){toast('Il browser ha bloccato la finestra di stampa','error');return}
  const label=`<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Etichetta ${esc(s.id)}</title>
@@ -330,7 +349,51 @@ function printShippingLabel(id){
  w.document.open();w.document.write(label);w.document.close();
 }
 
-function shipTable(ships){return `<table class="data-table"><thead><tr><th>Spedizione</th><th>Destinatario</th><th>Corriere</th><th>Stato</th><th>Prezzo</th><th>Data</th><th></th></tr></thead><tbody>${ships.map(s=>`<tr><td><strong>${s.id}</strong><div class="small muted mono">${s.tracking}</div></td><td>${s.recipient}<div class="small muted">${s.city}</div></td><td><span class="tag">${s.carrier}</span></td><td><span class="status ${statusClass(s.status)}">${s.status}</span></td><td><strong>${money(s.price)}</strong></td><td>${dateFmt(s.created)}</td><td>${shipmentDetailButton(s.id)}</td></tr>`).join('')||`<tr><td colspan="7"><div class="empty"><strong>Nessuna spedizione</strong>Crea la prima spedizione per iniziare.</div></td></tr>`}</tbody></table>`}
+
+function apiBackendBase(){
+ const meta=document.querySelector('meta[name="aps-backend-url"]');
+ return (meta?.content||'').replace(/\/$/,'');
+}
+function shipmentApiLinked(s){return !!(s.externalId||s.moovId||s.providerShipmentId)}
+function shipmentExternalId(s){return s.externalId||s.moovId||s.providerShipmentId||''}
+function shipmentActionsHtml(s){
+ const api=shipmentApiLinked(s);
+ return `<div class="ship-actions">
+   <button class="ship-action primary" onclick="printShippingLabel('${esc(s.id)}')">🖨 <span>Stampa etichetta</span></button>
+   <button class="ship-action" onclick="openShipmentDetail('${esc(s.id)}')">👁 <span>Visualizza spedizione</span></button>
+   <button class="ship-action danger" onclick="deleteShipment('${esc(s.id)}')">🗑 <span>Elimina</span></button>
+   <span class="api-pill ${api?'live':''}">${api?'● API collegata':'○ Demo locale'}</span>
+ </div>`;
+}
+async function deleteShipment(id){
+ const s=visibleShipments().find(x=>x.id===id)||state.shipments.find(x=>x.id===id);
+ if(!s)return;
+ const apiLinked=shipmentApiLinked(s),base=apiBackendBase();
+ const message=apiLinked
+   ?`Vuoi richiedere l'annullamento della spedizione ${s.id}? La richiesta verrà inviata al provider e la spedizione resterà visibile finché l'annullamento non sarà confermato.`
+   :`Vuoi eliminare la spedizione demo ${s.id} da questo browser?`;
+ if(!confirm(message))return;
+
+ if(apiLinked){
+   if(!base){toast('Backend API non ancora configurato: impossibile annullare una spedizione reale','error');return}
+   try{
+     const ext=shipmentExternalId(s);
+     const res=await fetch(`${base}/api/moov/shipments/${encodeURIComponent(s.carrier)}/${encodeURIComponent(ext)}`,{method:'DELETE',credentials:'include'});
+     const data=await res.json().catch(()=>({}));
+     if(!res.ok)throw new Error(data.error||`Errore ${res.status}`);
+     s.status=data.stato||data.status||'Annullamento in corso';
+     s.events=Array.isArray(s.events)?s.events:shipmentEvents(s);
+     s.events.push({status:s.status,date:new Date().toISOString().slice(0,10),note:'Richiesta di annullamento inviata al provider tramite API'});
+     save();toast('Richiesta di annullamento inviata al provider');render();
+   }catch(err){toast(err.message||'Errore durante l’annullamento API','error')}
+   return;
+ }
+
+ const idx=state.shipments.findIndex(x=>x.id===id);
+ if(idx>=0)state.shipments.splice(idx,1);
+ save();toast('Spedizione demo eliminata');render();
+}
+function shipTable(ships){return `<table class="data-table"><thead><tr><th>Spedizione</th><th>Destinatario</th><th>Corriere</th><th>Stato</th><th>Prezzo</th><th>Data</th><th class="actions-cell">AZIONI</th></tr></thead><tbody>${ships.map(s=>`<tr><td><strong>${s.id}</strong><div class="small muted mono">${s.tracking}</div></td><td>${s.recipient}<div class="small muted">${s.city}</div></td><td><span class="tag">${s.carrier}</span></td><td><span class="status ${statusClass(s.status)}">${s.status}</span></td><td><strong>${money(s.price)}</strong></td><td>${dateFmt(s.created)}</td><td class="actions-cell">${shipmentActionsHtml(s)}</td></tr>`).join('')||`<tr><td colspan="7"><div class="empty"><strong>Nessuna spedizione</strong>Crea la prima spedizione per iniziare.</div></td></tr>`}</tbody></table>`}
 
 function shipmentsPage(){const ships=visibleShipments();return `${pageHead('Spedizioni','Tutte le spedizioni visibili per il tuo livello.',`<button class="btn btn-primary" data-view="new">＋ Nuova spedizione</button>`)}<div class="panel"><div class="panel-body"><div class="toolbar"><input id="shipSearch" placeholder="Cerca numero, destinatario, tracking..."><select id="shipStatus"><option value="">Tutti gli stati</option>${['Presa in carico','In transito','In consegna','Consegnata','Giacenza'].map(x=>`<option>${x}</option>`).join('')}</select></div></div><div class="table-wrap" id="shipTableWrap">${shipTable(ships)}</div></div>`}
 
@@ -447,7 +510,7 @@ function pickupsPage(){const rows=visiblePickups();return `${pageHead('Ritiri pr
 function visibleHolds(){const ids=descendants(me());return (state.holds||[]).filter(x=>ids.includes(x.clientId))}
 function holdsPage(){const rows=visibleHolds();return `${pageHead('Giacenze e resi','Gestisci anomalie, riconsegne e rientri al mittente.')}${rows.length?`<div class="cards">${rows.map(h=>{const sh=state.shipments.find(s=>s.id===h.shipment);return `<div class="entity-card"><div class="entity-top"><div class="circle">↺</div><div><h4>${h.shipment}</h4><p>${sh?.recipient||'-'} · ${sh?.city||'-'} · ${h.reason}</p></div></div><div class="entity-meta"><div class="meta-box"><span>Data</span><strong>${dateFmt(h.date)}</strong></div><div class="meta-box"><span>Stato</span><strong>${h.status}</strong></div></div><div class="entity-actions">${h.action?`<span class="tag blue">${h.action}</span>`:`<button class="btn btn-soft holdAction" data-id="${h.id}" data-action="Riconsegna">Riconsegna</button><button class="btn btn-secondary holdAction" data-id="${h.id}" data-action="Reso al mittente">Reso</button>`}</div></div>`}).join('')}</div>`:`<div class="panel"><div class="panel-body"><div class="empty"><strong>Nessuna giacenza</strong>Non ci sono anomalie da gestire nel tuo perimetro.</div></div></div>`}`}
 
-function providersPage(){if(me().role!=='super')return dashboardPage();const rows=state.providers||[];return `${pageHead('Provider e API','Configura i corrieri disponibili. In questa fase i collegamenti sono simulati.')}<div class="notice">Qui predisponiamo la struttura per le API reali. Nessuna credenziale viene salvata in questa demo statica.</div><div class="cards">${rows.map(p=>`<div class="entity-card"><div class="entity-top"><div class="carrier-logo">${p.code}</div><div><h4>${p.name}</h4><p>Modalità ${p.mode} · ${p.status}</p></div></div><div class="entity-meta"><div class="meta-box"><span>Codice</span><strong>${p.code}</strong></div><div class="meta-box"><span>Stato</span><strong>${p.enabled?'Attivo':'Disattivo'}</strong></div></div><div class="entity-actions"><button class="btn ${p.enabled?'btn-danger':'btn-soft'} providerToggle" data-id="${p.id}">${p.enabled?'Disattiva':'Attiva'}</button></div></div>`).join('')}</div>`}
+function providersPage(){if(me().role!=='super')return dashboardPage();const rows=state.providers||[];return `${pageHead('Provider e API','Connessioni corriere predisposte per integrazione server-side con MoovExpress.')}<div class="notice"><strong>Integrazione reale:</strong> ogni contratto/corriere userà la propria API key custodita nel backend, mai nel browser. Quando il backend sarà collegato, creazione spedizione, tracking, etichetta, annullamento e credito provider saranno sincronizzati automaticamente.</div><div class="cards">${rows.map(p=>`<div class="entity-card"><div class="entity-top"><div class="carrier-logo">${p.code}</div><div><h4>${p.name}</h4><p>Modalità ${p.mode} · ${p.status}</p></div></div><div class="entity-meta"><div class="meta-box"><span>Codice</span><strong>${p.code}</strong></div><div class="meta-box"><span>Stato demo</span><strong>${p.enabled?'Attivo':'Disattivo'}</strong></div></div><div class="entity-actions"><button class="btn ${p.enabled?'btn-danger':'btn-soft'} providerToggle" data-id="${p.id}">${p.enabled?'Disattiva':'Attiva'}</button></div></div>`).join('')}</div>`}
 
 function usersPage(){if(me().role!=='super')return dashboardPage();return `${pageHead('Utenti e permessi','Controllo degli account presenti nella gerarchia.') }<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Account</th><th>Ruolo</th><th>Parent</th><th>Credito</th><th>Stato</th><th>Azione</th></tr></thead><tbody>${state.users.map(u=>`<tr><td><strong>${u.company}</strong><div class="small muted">${u.email}</div></td><td><span class="tag blue">${roleLabel(u.role)}</span></td><td>${u.parentId?state.users.find(x=>x.id===u.parentId)?.company||'-':'—'}</td><td>${money(u.balance)}</td><td><span class="status ${u.active!==false?'ok':'danger'}">${u.active!==false?'Attivo':'Sospeso'}</span></td><td>${u.role==='super'?'<span class="small muted">Account principale</span>':`<button class="btn btn-secondary userToggle" data-id="${u.id}">${u.active!==false?'Sospendi':'Riattiva'}</button>`}</td></tr>`).join('')}</tbody></table></div></div>`}
 
