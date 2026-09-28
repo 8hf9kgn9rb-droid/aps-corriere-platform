@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>APS Corriere Platform v0.6</title>
+  <title>APS Corriere Platform v0.6.1</title>
   <meta name="description" content="Piattaforma APS Corriere con gerarchia Super Master, Master e Cliente." />
   <meta name="aps-backend-url" content="" />
   <style>
@@ -85,7 +85,8 @@ textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:11px
 </head>
 <body>
   <div id="app"></div>
-  <script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script>
 const money = n => new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(Number(n||0));
 const dateFmt = d => new Intl.DateTimeFormat('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(d));
 const uid = p => p + Math.random().toString(36).slice(2,8).toUpperCase();
@@ -203,7 +204,7 @@ function loginPage(){return `
  <section class="login-brand">
   <div class="brand-lockup"><div class="brand-mark">APS</div><div>APS Corriere Platform</div></div>
   <div class="login-copy"><div class="eyebrow">Piattaforma logistica multi-livello</div><h1>Spedisci, gestisci e rivendi da un unico pannello.</h1><p>Una piattaforma originale per la rete APS Corriere: listini, credito, spedizioni, tracking e controllo gerarchico dal Super Master fino al Cliente.</p><div class="hierarchy"><span>Super Master</span><b>→</b><span>Master</span><b>→</b><span>Cliente</span></div></div>
-  <div class="login-foot">Versione 0.5 • dettaglio spedizione, tracking storico ed etichetta stampabile • dati salvati nel browser</div>
+  <div class="login-foot">Versione 0.6.1 • dettaglio spedizione, tracking storico ed etichetta stampabile • dati salvati nel browser</div>
  </section>
  <section class="login-panel"><div class="login-card">
   <h2>Accedi alla demo</h2><p>Scegli un profilo per vedere esattamente cosa può fare ogni livello della gerarchia.</p>
@@ -270,7 +271,7 @@ function openShipmentDetail(id){
   <div class="action-stack" style="margin-bottom:16px">
     <span class="status ${statusClass(s.status)}">${esc(s.status)}</span>
     <span class="tag">${esc(s.carrier)}</span>
-    <button class="btn btn-secondary" id="shipmentPrintLabel">▤ Stampa etichetta / PDF</button>
+    <button class="btn btn-secondary" id="shipmentPrintLabel">⬇ Scarica etichetta PDF</button>
   </div>
   <div class="detail-grid">
    <div class="detail-box"><h4>Mittente</h4>
@@ -329,70 +330,124 @@ function openShipmentDetail(id){
 function printShippingLabel(id){
  const s=visibleShipments().find(x=>x.id===id)||state.shipments.find(x=>x.id===id); if(!s)return;
  const base=apiBackendBase();
+
+ // Spedizione reale collegata via API: il PDF deve arrivare dal provider/backend.
  if(shipmentApiLinked(s)){
-   if(!base){toast('Backend API non ancora configurato: etichetta reale non disponibile','error');return}
+   if(!base){
+     toast('Etichetta reale non disponibile: collega prima il backend/API del provider','error');
+     return;
+   }
    const ext=shipmentExternalId(s);
-   window.open(`${base}/api/moov/shipments/${encodeURIComponent(s.carrier)}/${encodeURIComponent(ext)}/label`,'_blank');
-   return;
- }
- const sender=s.sender||{},w=window.open('','_blank','width=760,height=900');
- if(!w){toast('Il browser ha bloccato la finestra di stampa','error');return}
- const label=`<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Etichetta ${esc(s.id)}</title>
- <style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#111}.label{width:100mm;min-height:145mm;border:2px solid #111;padding:8mm;box-sizing:border-box}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px}.aps{font-size:28px;font-weight:900}.carrier{font-size:28px;font-weight:900}.block{padding:10px 0;border-bottom:1px solid #333}.block small{display:block;font-size:10px;text-transform:uppercase;color:#555;margin-bottom:5px}.big{font-size:18px;font-weight:700;line-height:1.4}.barcode{height:55px;background:repeating-linear-gradient(90deg,#000 0 2px,transparent 2px 4px,#000 4px 5px,transparent 5px 9px);margin:15px 0}.track{text-align:center;font-family:monospace;font-size:17px;font-weight:bold;letter-spacing:1px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px}.foot{margin-top:12px;font-size:10px;color:#555}@media print{body{padding:0}.label{border:2px solid #111}}</style></head><body>
- <div class="label"><div class="top"><div><div class="aps">APS CORRIERE</div><div>${esc(s.id)}</div></div><div class="carrier">${esc(s.carrier)}</div></div>
- <div class="block"><small>Mittente</small><div><strong>${esc(sender.name||'Mittente')}</strong><br>${esc(sender.address||'')}<br>${esc([sender.zip,sender.city,sender.province].filter(Boolean).join(' '))}</div></div>
- <div class="block"><small>Destinatario</small><div class="big">${esc(s.recipient)}<br>${esc(s.address||'')}<br>${esc([s.zip,s.city,s.province].filter(Boolean).join(' ')||s.city||'')}</div><div>${esc(s.phone||'')}</div></div>
- <div class="barcode"></div><div class="track">${esc(s.tracking)}</div>
- <div class="block meta"><div><strong>Colli</strong><br>${esc(s.parcels||1)}</div><div><strong>Peso</strong><br>${esc(s.chargeableWeight||s.weight||'—')} kg</div><div><strong>Riferimento</strong><br>${esc(s.reference||'—')}</div><div><strong>COD</strong><br>${s.cod?money(s.cod):'NO'}</div></div>
- <div class="foot">Etichetta DEMO APS Corriere Platform — non valida per il trasporto finché non viene generata dal provider tramite API reale.</div></div>
- <script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`;
- w.document.open();w.document.write(label);w.document.close();
-}
-
-
-function apiBackendBase(){
- const meta=document.querySelector('meta[name="aps-backend-url"]');
- return (meta?.content||'').replace(/\/$/,'');
-}
-function shipmentApiLinked(s){return !!(s.externalId||s.moovId||s.providerShipmentId)}
-function shipmentExternalId(s){return s.externalId||s.moovId||s.providerShipmentId||''}
-function shipmentActionsHtml(s){
- const api=shipmentApiLinked(s);
- return `<div class="ship-actions">
-   <button class="ship-action primary" onclick="printShippingLabel('${esc(s.id)}')">🖨 <span>Stampa etichetta</span></button>
-   <button class="ship-action" onclick="openShipmentDetail('${esc(s.id)}')">👁 <span>Visualizza spedizione</span></button>
-   <button class="ship-action danger" onclick="deleteShipment('${esc(s.id)}')">🗑 <span>Elimina</span></button>
-   <span class="api-pill ${api?'live':''}">${api?'● API collegata':'○ Demo locale'}</span>
- </div>`;
-}
-async function deleteShipment(id){
- const s=visibleShipments().find(x=>x.id===id)||state.shipments.find(x=>x.id===id);
- if(!s)return;
- const apiLinked=shipmentApiLinked(s),base=apiBackendBase();
- const message=apiLinked
-   ?`Vuoi richiedere l'annullamento della spedizione ${s.id}? La richiesta verrà inviata al provider e la spedizione resterà visibile finché l'annullamento non sarà confermato.`
-   :`Vuoi eliminare la spedizione demo ${s.id} da questo browser?`;
- if(!confirm(message))return;
-
- if(apiLinked){
-   if(!base){toast('Backend API non ancora configurato: impossibile annullare una spedizione reale','error');return}
-   try{
-     const ext=shipmentExternalId(s);
-     const res=await fetch(`${base}/api/moov/shipments/${encodeURIComponent(s.carrier)}/${encodeURIComponent(ext)}`,{method:'DELETE',credentials:'include'});
-     const data=await res.json().catch(()=>({}));
-     if(!res.ok)throw new Error(data.error||`Errore ${res.status}`);
-     s.status=data.stato||data.status||'Annullamento in corso';
-     s.events=Array.isArray(s.events)?s.events:shipmentEvents(s);
-     s.events.push({status:s.status,date:new Date().toISOString().slice(0,10),note:'Richiesta di annullamento inviata al provider tramite API'});
-     save();toast('Richiesta di annullamento inviata al provider');render();
-   }catch(err){toast(err.message||'Errore durante l’annullamento API','error')}
+   const a=document.createElement('a');
+   a.href=`${base}/api/moov/shipments/${encodeURIComponent(s.carrier)}/${encodeURIComponent(ext)}/label`;
+   a.target='_blank';
+   a.rel='noopener';
+   document.body.appendChild(a);
+   a.click();
+   a.remove();
    return;
  }
 
- const idx=state.shipments.findIndex(x=>x.id===id);
- if(idx>=0)state.shipments.splice(idx,1);
- save();toast('Spedizione demo eliminata');render();
+ // Spedizione demo: crea e scarica un vero PDF nel browser.
+ if(!window.jspdf || !window.jspdf.jsPDF){
+   toast('Modulo PDF non caricato. Aggiorna la pagina e riprova.','error');
+   return;
+ }
+ const {jsPDF}=window.jspdf;
+ const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a6'});
+ const sender=s.sender||{};
+ const pageW=105, margin=7, contentW=pageW-margin*2;
+
+ doc.setDrawColor(20);
+ doc.setLineWidth(.5);
+ doc.rect(4,4,97,140);
+
+ doc.setFont('helvetica','bold');
+ doc.setFontSize(15);
+ doc.text('APS CORRIERE',margin,12);
+ doc.setFontSize(13);
+ doc.text(String(s.carrier||''),pageW-margin,12,{align:'right'});
+
+ doc.setLineWidth(.35);
+ doc.line(margin,16,pageW-margin,16);
+
+ doc.setFontSize(8);
+ doc.setFont('helvetica','normal');
+ doc.text('SPEDIZIONE',margin,21);
+ doc.setFont('helvetica','bold');
+ doc.setFontSize(11);
+ doc.text(String(s.id||''),margin,27);
+
+ doc.setFontSize(7);
+ doc.setFont('helvetica','normal');
+ doc.text('MITTENTE',margin,34);
+ doc.setFontSize(8.5);
+ doc.setFont('helvetica','bold');
+ doc.text(String(sender.name||'Mittente'),margin,39,{maxWidth:contentW});
+ doc.setFont('helvetica','normal');
+ let y=44;
+ const senderLines=[
+   sender.address||'',
+   [sender.zip,sender.city,sender.province].filter(Boolean).join(' '),
+   sender.phone||''
+ ].filter(Boolean);
+ senderLines.forEach(t=>{doc.text(String(t),margin,y,{maxWidth:contentW});y+=4;});
+
+ y+=2;
+ doc.line(margin,y,pageW-margin,y); y+=5;
+ doc.setFontSize(7);
+ doc.text('DESTINATARIO',margin,y); y+=5;
+ doc.setFontSize(11);
+ doc.setFont('helvetica','bold');
+ const recLines=doc.splitTextToSize(String(s.recipient||''),contentW);
+ doc.text(recLines,margin,y); y+=recLines.length*5;
+ doc.setFontSize(8.5);
+ doc.setFont('helvetica','normal');
+ const destLines=[
+   s.address||'',
+   [s.zip,s.city,s.province].filter(Boolean).join(' ') || s.city || '',
+   s.phone||''
+ ].filter(Boolean);
+ destLines.forEach(t=>{doc.text(String(t),margin,y,{maxWidth:contentW});y+=4.5;});
+
+ y+=2;
+ doc.line(margin,y,pageW-margin,y); y+=5;
+
+ // Barcode-like visual (demo)
+ const bx=margin, by=y, bh=16;
+ let x=bx;
+ const code=String(s.tracking||s.id||'APS');
+ for(let i=0;i<code.length*3 && x<pageW-margin;i++){
+   const w=((code.charCodeAt(i%code.length)+i)%3===0)?1.1:.45;
+   if(i%2===0){doc.setFillColor(0);doc.rect(x,by,w,bh,'F');}
+   x+=w+.55;
+ }
+ y+=bh+4;
+ doc.setFont('courier','bold');
+ doc.setFontSize(9);
+ doc.text(String(s.tracking||s.id||''),pageW/2,y,{align:'center'}); y+=7;
+
+ doc.setFont('helvetica','normal');
+ doc.setFontSize(8);
+ const meta=[
+   `Colli: ${s.parcels||1}`,
+   `Peso: ${s.chargeableWeight||s.weight||'—'} kg`,
+   `Rif.: ${s.reference||'—'}`,
+   `COD: ${s.cod?money(s.cod):'NO'}`
+ ];
+ meta.forEach((t,i)=>{
+   const col=i%2,row=Math.floor(i/2);
+   doc.text(t,margin+col*46,y+row*5);
+ });
+ y+=13;
+ doc.setFontSize(6.5);
+ doc.setTextColor(90);
+ doc.text('ETICHETTA DEMO - non valida per il trasporto finché non generata dal provider via API reale.',margin,y,{maxWidth:contentW});
+
+ doc.save(`etichetta-${String(s.id||'spedizione')}.pdf`);
+ toast('Etichetta PDF scaricata');
 }
+
 function shipTable(ships){return `<table class="data-table"><thead><tr><th>Spedizione</th><th>Destinatario</th><th>Corriere</th><th>Stato</th><th>Prezzo</th><th>Data</th><th class="actions-cell">AZIONI</th></tr></thead><tbody>${ships.map(s=>`<tr><td><strong>${s.id}</strong><div class="small muted mono">${s.tracking}</div></td><td>${s.recipient}<div class="small muted">${s.city}</div></td><td><span class="tag">${s.carrier}</span></td><td><span class="status ${statusClass(s.status)}">${s.status}</span></td><td><strong>${money(s.price)}</strong></td><td>${dateFmt(s.created)}</td><td class="actions-cell">${shipmentActionsHtml(s)}</td></tr>`).join('')||`<tr><td colspan="7"><div class="empty"><strong>Nessuna spedizione</strong>Crea la prima spedizione per iniziare.</div></td></tr>`}</tbody></table>`}
 
 function shipmentsPage(){const ships=visibleShipments();return `${pageHead('Spedizioni','Tutte le spedizioni visibili per il tuo livello.',`<button class="btn btn-primary" data-view="new">＋ Nuova spedizione</button>`)}<div class="panel"><div class="panel-body"><div class="toolbar"><input id="shipSearch" placeholder="Cerca numero, destinatario, tracking..."><select id="shipStatus"><option value="">Tutti gli stati</option>${['Presa in carico','In transito','In consegna','Consegnata','Giacenza'].map(x=>`<option>${x}</option>`).join('')}</select></div></div><div class="table-wrap" id="shipTableWrap">${shipTable(ships)}</div></div>`}
@@ -684,7 +739,7 @@ function doTracking(){
  if(!s){r.innerHTML=`<div class="notice" style="margin-top:16px">Spedizione non trovata nel tuo perimetro.</div>`;return}
  r.innerHTML=`<div style="margin-top:22px"><div class="entity-card">
    <div class="entity-top"><div class="carrier-logo">${esc(s.carrier)}</div><div><h4>${esc(s.id)}</h4><p>${esc(s.recipient)} · ${esc(s.city)} · ${esc(s.tracking)}</p></div></div>
-   <div class="action-stack" style="margin-top:14px"><span class="status ${statusClass(s.status)}">${esc(s.status)}</span><button class="btn btn-secondary" onclick="openShipmentDetail('${esc(s.id)}')">Apri dettagli</button><button class="btn btn-secondary" onclick="printShippingLabel('${esc(s.id)}')">Stampa etichetta / PDF</button></div>
+   <div class="action-stack" style="margin-top:14px"><span class="status ${statusClass(s.status)}">${esc(s.status)}</span><button class="btn btn-secondary" onclick="openShipmentDetail('${esc(s.id)}')">Apri dettagli</button><button class="btn btn-secondary" onclick="printShippingLabel('${esc(s.id)}')">Scarica etichetta PDF</button></div>
    <div style="margin-top:20px">${eventTimelineHtml(s)}</div>
    ${s.status==='Giacenza'?'<div class="notice">La spedizione risulta in giacenza. Usa la sezione “Giacenze e resi” per gestirla.</div>':''}
  </div></div>`;
