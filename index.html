@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>APS Corriere Platform v0.4.1</title>
+  <title>APS Corriere Platform v0.5</title>
   <meta name="description" content="Piattaforma APS Corriere con gerarchia Super Master, Master e Cliente." />
   <style>
 :root{
@@ -52,6 +52,22 @@ button,input,select,textarea{font:inherit} button{cursor:pointer} a{color:inheri
 
 .section-title{grid-column:1/-1;margin:22px 0 2px;font-size:14px;font-weight:800;color:var(--text);padding-top:14px;border-top:1px solid var(--line)}
 textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:#fff;color:var(--text);resize:vertical}
+
+
+.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.detail-box{border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--panel2)}
+.detail-box h4{margin:0 0 10px;font-size:13px}
+.detail-row{display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px dashed #e5e7eb;font-size:12px}
+.detail-row:last-child{border-bottom:0}.detail-row span{color:var(--muted);text-align:right}
+.action-stack{display:flex;flex-wrap:wrap;gap:8px}
+.table-action{border:1px solid var(--line);background:white;color:var(--brand);padding:7px 10px;border-radius:9px;font-weight:700;font-size:11px}
+.track-event{display:grid;grid-template-columns:18px 1fr;gap:12px;position:relative;padding:0 0 18px}
+.track-event:before{content:"";position:absolute;left:8px;top:17px;bottom:0;width:2px;background:#dce7fb}
+.track-event:last-child:before{display:none}.track-event-dot{width:18px;height:18px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 5px var(--brandSoft)}
+.track-event strong{display:block;font-size:12px}.track-event small{display:block;color:var(--muted);margin-top:3px}
+.label-preview{border:2px dashed #b8c6db;border-radius:14px;padding:16px;background:#fff}
+.label-preview .barcode{height:42px;background:repeating-linear-gradient(90deg,#111 0 2px,transparent 2px 5px,#111 5px 6px,transparent 6px 10px);margin:12px 0}
+@media(max-width:760px){.detail-grid{grid-template-columns:1fr}}
 
 </style>
 </head>
@@ -175,7 +191,7 @@ function loginPage(){return `
  <section class="login-brand">
   <div class="brand-lockup"><div class="brand-mark">APS</div><div>APS Corriere Platform</div></div>
   <div class="login-copy"><div class="eyebrow">Piattaforma logistica multi-livello</div><h1>Spedisci, gestisci e rivendi da un unico pannello.</h1><p>Una piattaforma originale per la rete APS Corriere: listini, credito, spedizioni, tracking e controllo gerarchico dal Super Master fino al Cliente.</p><div class="hierarchy"><span>Super Master</span><b>→</b><span>Master</span><b>→</b><span>Cliente</span></div></div>
-  <div class="login-foot">Versione 0.3 • listini gerarchici e margini • dati salvati nel browser • integrazioni corriere predisposte ma non ancora reali</div>
+  <div class="login-foot">Versione 0.5 • dettaglio spedizione, tracking storico ed etichetta stampabile • dati salvati nel browser</div>
  </section>
  <section class="login-panel"><div class="login-card">
   <h2>Accedi alla demo</h2><p>Scegli un profilo per vedere esattamente cosa può fare ogni livello della gerarchia.</p>
@@ -209,7 +225,112 @@ function dashboardPage(){const u=me(),ships=visibleShipments(u),clients=visibleC
 <div class="grid-2"><div class="panel"><div class="panel-head"><h3>Spedizioni recenti</h3><button class="btn btn-secondary" data-view="shipments">Vedi tutte</button></div><div class="table-wrap">${shipTable(ships.slice(0,6))}</div></div><div class="panel"><div class="panel-head"><h3>${u.role==='client'?'Andamento spedizioni':'Performance rete'}</h3><span class="tag blue">Ultimi 7 gg</span></div><div class="panel-body"><div class="chart">${[4,7,5,9,11,8,13].map((x,i)=>`<div class="bar-wrap"><div class="bar" style="height:${x*10}px" data-value="${x} sped."></div><span>${['Lun','Mar','Mer','Gio','Ven','Sab','Dom'][i]}</span></div>`).join('')}</div></div></div></div>
 <div style="height:18px"></div><div class="grid-2-equal"><div class="panel"><div class="panel-head"><h3>Stati operativi</h3></div><div class="panel-body"><div class="list">${['Consegnata','In transito','In consegna','Giacenza'].map(s=>`<div class="list-row"><span class="status ${statusClass(s)}">${s}</span><div class="grow"></div><strong>${ships.filter(x=>x.status===s).length}</strong></div>`).join('')}</div></div></div><div class="panel"><div class="panel-head"><h3>Ultimi movimenti</h3></div><div class="panel-body"><div class="list">${visibleTransactions().slice(0,5).map(t=>`<div class="list-row"><div class="circle">€</div><div class="grow"><strong>${t.type}</strong><span>${t.note} · ${dateFmt(t.date)}</span></div><div class="money ${t.amount>=0?'positive':'negative'}">${t.amount>=0?'+':''}${money(t.amount)}</div></div>`).join('')||'<div class="empty">Nessun movimento</div>'}</div></div></div></div>`}
 function kpi(label,value,ico,foot){return `<div class="kpi"><div class="kpi-top"><span class="kpi-label">${label}</span><span class="kpi-icon">${ico}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`}
-function shipTable(ships){return `<table class="data-table"><thead><tr><th>Spedizione</th><th>Destinatario</th><th>Corriere</th><th>Stato</th><th>Prezzo</th><th>Data</th></tr></thead><tbody>${ships.map(s=>`<tr><td><strong>${s.id}</strong><div class="small muted mono">${s.tracking}</div></td><td>${s.recipient}<div class="small muted">${s.city}</div></td><td><span class="tag">${s.carrier}</span></td><td><span class="status ${statusClass(s.status)}">${s.status}</span></td><td><strong>${money(s.price)}</strong></td><td>${dateFmt(s.created)}</td></tr>`).join('')||`<tr><td colspan="6"><div class="empty"><strong>Nessuna spedizione</strong>Crea la prima spedizione per iniziare.</div></td></tr>`}</tbody></table>`}
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
+function shipmentEvents(s){
+ if(Array.isArray(s.events)&&s.events.length)return s.events;
+ const steps=['Presa in carico','In transito','In consegna','Consegnata'];
+ if(s.status==='Giacenza')return [
+   {status:'Presa in carico',date:s.created,note:'Spedizione registrata sulla piattaforma'},
+   {status:'In transito',date:s.created,note:'Spedizione affidata al network'},
+   {status:'Giacenza',date:s.created,note:'Consegna non completata; spedizione in giacenza'}
+ ];
+ let idx=steps.indexOf(s.status); if(idx<0)idx=0;
+ return steps.slice(0,idx+1).map((status,i)=>({status,date:s.created,note:i===0?'Spedizione registrata sulla piattaforma':'Evento tracking demo'}));
+}
+function eventTimelineHtml(s){
+ const ev=shipmentEvents(s);
+ return `<div>${ev.map(e=>`<div class="track-event"><div class="track-event-dot"></div><div><strong>${esc(e.status)}</strong><small>${esc(dateFmt(e.date))} · ${esc(e.note||'Evento registrato')}</small></div></div>`).join('')}</div>`;
+}
+function shipmentDetailButton(id){return `<button class="table-action" onclick="openShipmentDetail('${esc(id)}')">Dettagli</button>`}
+function openShipmentDetail(id){
+ const s=visibleShipments().find(x=>x.id===id); if(!s){toast('Spedizione non disponibile','error');return}
+ const u=me(),owner=state.users.find(x=>x.id===s.ownerId),master=state.users.find(x=>x.id===s.masterId);
+ const sender=s.sender||{};
+ const canManage=u.role!=='client';
+ const statusOptions=['Presa in carico','In transito','In consegna','Consegnata','Giacenza','Annullata'];
+ const economics=u.role==='client'?'':u.role==='master'
+   ?`<div class="detail-row"><strong>Tuo costo</strong><span>${money(s.masterCost??s.cost??0)}</span></div><div class="detail-row"><strong>Prezzo cliente</strong><span>${money(s.clientPrice??s.price??0)}</span></div>`
+   :`<div class="detail-row"><strong>Costo provider</strong><span>${money(s.providerCost??s.cost??0)}</span></div><div class="detail-row"><strong>Costo Master</strong><span>${money(s.masterCost??0)}</span></div><div class="detail-row"><strong>Prezzo Cliente</strong><span>${money(s.clientPrice??s.price??0)}</span></div>`;
+ const html=`<div class="modal-backdrop" id="shipmentModalBg"><div class="modal" style="width:min(980px,100%)">
+ <div class="modal-head"><div><h3>${esc(s.id)}</h3><div class="small muted mono">${esc(s.tracking)}</div></div><button class="modal-close" id="shipmentModalClose">×</button></div>
+ <div class="modal-body">
+  <div class="action-stack" style="margin-bottom:16px">
+    <span class="status ${statusClass(s.status)}">${esc(s.status)}</span>
+    <span class="tag">${esc(s.carrier)}</span>
+    <button class="btn btn-secondary" id="shipmentPrintLabel">▤ Stampa etichetta / PDF</button>
+  </div>
+  <div class="detail-grid">
+   <div class="detail-box"><h4>Mittente</h4>
+    <div class="detail-row"><strong>Nome</strong><span>${esc(sender.name||'Dato non disponibile')}</span></div>
+    <div class="detail-row"><strong>Indirizzo</strong><span>${esc(sender.address||'—')}</span></div>
+    <div class="detail-row"><strong>Località</strong><span>${esc([sender.zip,sender.city,sender.province].filter(Boolean).join(' ')||'—')}</span></div>
+    <div class="detail-row"><strong>Telefono</strong><span>${esc(sender.phone||'—')}</span></div>
+    <div class="detail-row"><strong>Email</strong><span>${esc(sender.email||'—')}</span></div>
+   </div>
+   <div class="detail-box"><h4>Destinatario</h4>
+    <div class="detail-row"><strong>Nome</strong><span>${esc(s.recipient)}</span></div>
+    <div class="detail-row"><strong>Indirizzo</strong><span>${esc(s.address||'—')}</span></div>
+    <div class="detail-row"><strong>Località</strong><span>${esc([s.zip,s.city,s.province].filter(Boolean).join(' ')||s.city||'—')}</span></div>
+    <div class="detail-row"><strong>Telefono</strong><span>${esc(s.phone||'—')}</span></div>
+    <div class="detail-row"><strong>Email</strong><span>${esc(s.email||'—')}</span></div>
+   </div>
+   <div class="detail-box"><h4>Pacco e servizi</h4>
+    <div class="detail-row"><strong>Colli</strong><span>${esc(s.parcels||1)}</span></div>
+    <div class="detail-row"><strong>Peso reale</strong><span>${esc(s.weight||'—')} kg</span></div>
+    <div class="detail-row"><strong>Peso volumetrico</strong><span>${esc(s.volumetricWeight||'—')} kg</span></div>
+    <div class="detail-row"><strong>Peso tariffabile</strong><span>${esc(s.chargeableWeight||s.weight||'—')} kg</span></div>
+    <div class="detail-row"><strong>Dimensioni</strong><span>${s.length?`${esc(s.length)} × ${esc(s.width)} × ${esc(s.height)} cm`:'—'}</span></div>
+    <div class="detail-row"><strong>Contenuto</strong><span>${esc(s.content||'Non specificato')}</span></div>
+    <div class="detail-row"><strong>Riferimento</strong><span>${esc(s.reference||'—')}</span></div>
+    <div class="detail-row"><strong>Contrassegno</strong><span>${s.cod?money(s.cod):'No'}</span></div>
+    <div class="detail-row"><strong>Assicurazione</strong><span>${s.insurance?'Sì':'No'}</span></div>
+   </div>
+   <div class="detail-box"><h4>Economia e rete</h4>
+    <div class="detail-row"><strong>Cliente</strong><span>${esc(owner?.company||'—')}</span></div>
+    <div class="detail-row"><strong>Master</strong><span>${esc(master?.company||'—')}</span></div>
+    <div class="detail-row"><strong>Corriere</strong><span>${esc(s.carrier)}</span></div>
+    <div class="detail-row"><strong>Prezzo</strong><span>${money(s.price)}</span></div>
+    ${economics}
+   </div>
+  </div>
+  ${canManage?`<div class="detail-box" style="margin-top:14px"><h4>Aggiorna stato demo</h4><div class="action-stack"><select id="detailStatus">${statusOptions.map(x=>`<option ${x===s.status?'selected':''}>${x}</option>`).join('')}</select><button class="btn btn-secondary" id="detailStatusSave">Salva stato</button></div></div>`:''}
+  <div class="detail-box" style="margin-top:14px"><h4>Storico tracking</h4>${eventTimelineHtml(s)}</div>
+ </div>
+ <div class="modal-foot"><button class="btn btn-secondary" id="shipmentModalClose2">Chiudi</button></div>
+ </div></div>`;
+ document.body.insertAdjacentHTML('beforeend',html);
+ const close=()=>document.getElementById('shipmentModalBg')?.remove();
+ document.getElementById('shipmentModalClose').onclick=close;
+ document.getElementById('shipmentModalClose2').onclick=close;
+ document.getElementById('shipmentPrintLabel').onclick=()=>printShippingLabel(s.id);
+ document.getElementById('detailStatusSave')?.addEventListener('click',()=>{
+   const next=document.getElementById('detailStatus').value;
+   if(next!==s.status){
+     s.status=next;
+     if(!Array.isArray(s.events))s.events=shipmentEvents(s);
+     s.events.push({status:next,date:new Date().toISOString().slice(0,10),note:'Stato aggiornato dalla piattaforma'});
+     save();close();toast('Stato aggiornato');render();
+   }else toast('Lo stato è già aggiornato');
+ });
+}
+function printShippingLabel(id){
+ const s=visibleShipments().find(x=>x.id===id)||state.shipments.find(x=>x.id===id); if(!s)return;
+ const sender=s.sender||{},w=window.open('','_blank','width=760,height=900');
+ if(!w){toast('Il browser ha bloccato la finestra di stampa','error');return}
+ const label=`<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Etichetta ${esc(s.id)}</title>
+ <style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#111}.label{width:100mm;min-height:145mm;border:2px solid #111;padding:8mm;box-sizing:border-box}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px}.aps{font-size:28px;font-weight:900}.carrier{font-size:28px;font-weight:900}.block{padding:10px 0;border-bottom:1px solid #333}.block small{display:block;font-size:10px;text-transform:uppercase;color:#555;margin-bottom:5px}.big{font-size:18px;font-weight:700;line-height:1.4}.barcode{height:55px;background:repeating-linear-gradient(90deg,#000 0 2px,transparent 2px 4px,#000 4px 5px,transparent 5px 9px);margin:15px 0}.track{text-align:center;font-family:monospace;font-size:17px;font-weight:bold;letter-spacing:1px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px}.foot{margin-top:12px;font-size:10px;color:#555}@media print{body{padding:0}.label{border:2px solid #111}}</style></head><body>
+ <div class="label"><div class="top"><div><div class="aps">APS CORRIERE</div><div>${esc(s.id)}</div></div><div class="carrier">${esc(s.carrier)}</div></div>
+ <div class="block"><small>Mittente</small><div><strong>${esc(sender.name||'Mittente')}</strong><br>${esc(sender.address||'')}<br>${esc([sender.zip,sender.city,sender.province].filter(Boolean).join(' '))}</div></div>
+ <div class="block"><small>Destinatario</small><div class="big">${esc(s.recipient)}<br>${esc(s.address||'')}<br>${esc([s.zip,s.city,s.province].filter(Boolean).join(' ')||s.city||'')}</div><div>${esc(s.phone||'')}</div></div>
+ <div class="barcode"></div><div class="track">${esc(s.tracking)}</div>
+ <div class="block meta"><div><strong>Colli</strong><br>${esc(s.parcels||1)}</div><div><strong>Peso</strong><br>${esc(s.chargeableWeight||s.weight||'—')} kg</div><div><strong>Riferimento</strong><br>${esc(s.reference||'—')}</div><div><strong>COD</strong><br>${s.cod?money(s.cod):'NO'}</div></div>
+ <div class="foot">Etichetta DEMO APS Corriere Platform — non valida per il trasporto finché non viene generata dal provider tramite API reale.</div></div>
+ <script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`;
+ w.document.open();w.document.write(label);w.document.close();
+}
+
+function shipTable(ships){return `<table class="data-table"><thead><tr><th>Spedizione</th><th>Destinatario</th><th>Corriere</th><th>Stato</th><th>Prezzo</th><th>Data</th><th></th></tr></thead><tbody>${ships.map(s=>`<tr><td><strong>${s.id}</strong><div class="small muted mono">${s.tracking}</div></td><td>${s.recipient}<div class="small muted">${s.city}</div></td><td><span class="tag">${s.carrier}</span></td><td><span class="status ${statusClass(s.status)}">${s.status}</span></td><td><strong>${money(s.price)}</strong></td><td>${dateFmt(s.created)}</td><td>${shipmentDetailButton(s.id)}</td></tr>`).join('')||`<tr><td colspan="7"><div class="empty"><strong>Nessuna spedizione</strong>Crea la prima spedizione per iniziare.</div></td></tr>`}</tbody></table>`}
 
 function shipmentsPage(){const ships=visibleShipments();return `${pageHead('Spedizioni','Tutte le spedizioni visibili per il tuo livello.',`<button class="btn btn-primary" data-view="new">＋ Nuova spedizione</button>`)}<div class="panel"><div class="panel-body"><div class="toolbar"><input id="shipSearch" placeholder="Cerca numero, destinatario, tracking..."><select id="shipStatus"><option value="">Tutti gli stati</option>${['Presa in carico','In transito','In consegna','Consegnata','Giacenza'].map(x=>`<option>${x}</option>`).join('')}</select></div></div><div class="table-wrap" id="shipTableWrap">${shipTable(ships)}</div></div>`}
 
@@ -331,7 +452,7 @@ function providersPage(){if(me().role!=='super')return dashboardPage();const row
 function usersPage(){if(me().role!=='super')return dashboardPage();return `${pageHead('Utenti e permessi','Controllo degli account presenti nella gerarchia.') }<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Account</th><th>Ruolo</th><th>Parent</th><th>Credito</th><th>Stato</th><th>Azione</th></tr></thead><tbody>${state.users.map(u=>`<tr><td><strong>${u.company}</strong><div class="small muted">${u.email}</div></td><td><span class="tag blue">${roleLabel(u.role)}</span></td><td>${u.parentId?state.users.find(x=>x.id===u.parentId)?.company||'-':'—'}</td><td>${money(u.balance)}</td><td><span class="status ${u.active!==false?'ok':'danger'}">${u.active!==false?'Attivo':'Sospeso'}</span></td><td>${u.role==='super'?'<span class="small muted">Account principale</span>':`<button class="btn btn-secondary userToggle" data-id="${u.id}">${u.active!==false?'Sospendi':'Riattiva'}</button>`}</td></tr>`).join('')}</tbody></table></div></div>`}
 
 function trackingPage(){return `${pageHead('Tracking','Cerca una spedizione con il numero APS o il codice tracking.')}
-<div class="grid-2-equal"><div class="panel"><div class="panel-body"><div class="field"><label>Numero spedizione o tracking</label><input id="trackingInput" placeholder="Es. APS260001"></div><button class="btn btn-primary" id="trackingBtn">Cerca spedizione</button><div id="trackingResult"></div></div></div><div class="panel"><div class="panel-head"><h3>Tracking pubblico white-label</h3></div><div class="panel-body"><p class="muted" style="line-height:1.7;font-size:12px">Nella versione completa, ogni Cliente avrà una pagina di tracking con il proprio marchio e notifiche email/SMS. Il destinatario potrà seguirla senza login.</p><div class="notice">La demo mostra già la timeline interna; collegando le API corriere gli eventi arriveranno automaticamente.</div></div></div></div>`}
+<div class="grid-2-equal"><div class="panel"><div class="panel-body"><div class="field"><label>Numero spedizione o tracking</label><input id="trackingInput" placeholder="Es. APS260001"></div><button class="btn btn-primary" id="trackingBtn">Cerca spedizione</button><div id="trackingResult"></div></div></div><div class="panel"><div class="panel-head"><h3>Tracking APS</h3></div><div class="panel-body"><p class="muted" style="line-height:1.7;font-size:12px">La timeline ora conserva anche lo storico degli stati modificati nella demo.</p><div class="notice">Quando collegheremo le API dei corrieri, gli eventi reali sostituiranno gli aggiornamenti demo.</div></div></div></div>`}
 
 function reportsPage(){return `${pageHead('Report','Esporta i dati visibili al tuo livello.',`<button class="btn btn-primary" id="exportCsv">⇩ Esporta CSV</button>`)}<div class="cards"><div class="entity-card"><div class="entity-top"><div class="circle">▣</div><div><h4>Report spedizioni</h4><p>Numero, cliente, corriere, stato e importi.</p></div></div></div><div class="entity-card"><div class="entity-top"><div class="circle">€</div><div><h4>Report economico</h4><p>Prezzi, costi provider, costi Master e margini della rete visibile.</p></div></div></div><div class="entity-card"><div class="entity-top"><div class="circle">◎</div><div><h4>Report contrassegni</h4><p>Incassi e stati COD consolidati.</p></div></div></div></div><div style="height:18px"></div><div class="panel"><div class="panel-head"><h3>Anteprima dati</h3></div><div class="table-wrap">${shipTable(visibleShipments().slice(0,8))}</div></div>`}
 
@@ -472,7 +593,8 @@ function createShipment(q){
    cod:+qCod.value,
    insurance:+qInsurance.value>0,
    created:new Date().toISOString().slice(0,10),
-   tracking:q.name+num
+   tracking:q.name+num,
+   events:[{status:'Presa in carico',date:new Date().toISOString().slice(0,10),note:'Spedizione creata sulla piattaforma'}]
  };
 
  state.shipments.unshift(s);
@@ -492,7 +614,18 @@ function toggleProvider(id){const p=state.providers.find(x=>x.id===id);if(!p)ret
 function toggleUser(id){const u=state.users.find(x=>x.id===id);if(!u||u.role==='super')return;u.active=u.active===false;save();toast(u.company+' '+(u.active?'riattivato':'sospeso'));render()}
 
 function rechargeDemo(){const u=me();u.balance=+(u.balance+100).toFixed(2);state.transactions.unshift({id:uid('T'),userId:u.id,type:'Ricarica',amount:100,date:new Date().toISOString().slice(0,10),note:'Ricarica demo'});save();toast('Ricarica demo di €100 effettuata');render()}
-function doTracking(){const q=trackingInput.value.trim().toLowerCase();const s=visibleShipments().find(x=>x.id.toLowerCase()===q||x.tracking.toLowerCase()===q);const r=document.getElementById('trackingResult');if(!s){r.innerHTML=`<div class="notice" style="margin-top:16px">Spedizione non trovata nel tuo perimetro.</div>`;return}const steps=['Presa in carico','In transito','In consegna','Consegnata'],idx=Math.max(0,steps.indexOf(s.status));r.innerHTML=`<div style="margin-top:22px"><div class="entity-card"><div class="entity-top"><div class="carrier-logo">${s.carrier}</div><div><h4>${s.id}</h4><p>${s.recipient} · ${s.city} · ${s.tracking}</p></div></div><div class="timeline" style="margin-top:20px">${steps.map((x,i)=>`<div class="timeline-step ${i<idx?'done':i===idx?'current':''}"><div class="dot">${i+1}</div><div><strong>${x}</strong><p>${i<=idx?'Evento registrato':'In attesa'}</p></div></div>`).join('')}</div>${s.status==='Giacenza'?'<div class="notice">La spedizione risulta in giacenza. Nella versione completa qui potrai richiedere riconsegna, cambio indirizzo o reso.</div>':''}</div></div>`}
+function doTracking(){
+ const q=trackingInput.value.trim().toLowerCase();
+ const s=visibleShipments().find(x=>x.id.toLowerCase()===q||x.tracking.toLowerCase()===q);
+ const r=document.getElementById('trackingResult');
+ if(!s){r.innerHTML=`<div class="notice" style="margin-top:16px">Spedizione non trovata nel tuo perimetro.</div>`;return}
+ r.innerHTML=`<div style="margin-top:22px"><div class="entity-card">
+   <div class="entity-top"><div class="carrier-logo">${esc(s.carrier)}</div><div><h4>${esc(s.id)}</h4><p>${esc(s.recipient)} · ${esc(s.city)} · ${esc(s.tracking)}</p></div></div>
+   <div class="action-stack" style="margin-top:14px"><span class="status ${statusClass(s.status)}">${esc(s.status)}</span><button class="btn btn-secondary" onclick="openShipmentDetail('${esc(s.id)}')">Apri dettagli</button><button class="btn btn-secondary" onclick="printShippingLabel('${esc(s.id)}')">Stampa etichetta / PDF</button></div>
+   <div style="margin-top:20px">${eventTimelineHtml(s)}</div>
+   ${s.status==='Giacenza'?'<div class="notice">La spedizione risulta in giacenza. Usa la sezione “Giacenze e resi” per gestirla.</div>':''}
+ </div></div>`;
+}
 function exportCSV(){const rows=visibleShipments();const csv=['Numero,Destinatario,Indirizzo,CAP,Citta,Provincia,Telefono,Email,Colli,PesoReale,PesoVolumetrico,PesoTariffabile,Contenuto,Riferimento,Corriere,Stato,Prezzo,Costo,Tracking',...rows.map(s=>[s.id,s.recipient,s.address||'',s.zip||'',s.city,s.province||'',s.phone||'',s.email||'',s.parcels||1,s.weight||'',s.volumetricWeight||'',s.chargeableWeight||s.weight||'',s.content||'',s.reference||'',s.carrier,s.status,s.price,s.cost,s.tracking].map(v=>`"${String(v).replaceAll('"','""')}"`).join(','))].join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='aps-corriere-spedizioni.csv';a.click();URL.revokeObjectURL(url);toast('CSV esportato')}
 function exportEconomicCSV(){const u=me(),rows=visibleShipments(u);const csv=['Spedizione,Data,Cliente,Corriere,Vendita,Costo,Margine',...rows.map(s=>{const e=shipmentEconomics(s,u),cl=state.users.find(x=>x.id===s.ownerId);return [s.id,s.created,cl?.company||'',s.carrier,e.sale,e.cost,e.margin].map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')})].join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='aps-corriere-margini.csv';a.click();URL.revokeObjectURL(url);toast('Report margini esportato')}
 function saveSettings(e){e.preventDefault();state.settings.brand=setBrand.value;state.settings.email=setEmail.value;state.settings.primary=setColor.value;save();document.documentElement.style.setProperty('--brand',setColor.value);toast('Impostazioni salvate')}
