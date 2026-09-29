@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>APS Corriere Platform v0.7</title>
+  <title>APS Corriere Platform v0.7.1</title>
   <meta name="description" content="Piattaforma APS Corriere con gerarchia Super Master, Master e Cliente." />
   <meta name="aps-backend-url" content="https://aps-api-production.up.railway.app" />
   <style>
@@ -95,8 +95,7 @@ textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:11px
 </head>
 <body>
   <div id="app"></div>
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-<script>
+  <script>
 const money = n => new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(Number(n||0));
 const dateFmt = d => new Intl.DateTimeFormat('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(d));
 const uid = p => p + Math.random().toString(36).slice(2,8).toUpperCase();
@@ -228,7 +227,7 @@ function loginPage(){return `
  <section class="login-brand">
   <div class="brand-lockup"><div class="brand-mark">APS</div><div>APS Corriere Platform</div></div>
   <div class="login-copy"><div class="eyebrow">Piattaforma logistica multi-livello</div><h1>Spedisci, gestisci e rivendi da un unico pannello.</h1><p>Una piattaforma originale per la rete APS Corriere: listini, credito, spedizioni, tracking e controllo gerarchico dal Super Master fino al Cliente.</p><div class="hierarchy"><span>Super Master</span><b>→</b><span>Master</span><b>→</b><span>Cliente</span></div></div>
-  <div class="login-foot">Versione 0.6.1 • dettaglio spedizione, tracking storico ed etichetta stampabile • dati salvati nel browser</div>
+  <div class="login-foot">Versione 0.7.1 • dettaglio spedizione, tracking storico ed etichetta stampabile • dati salvati nel browser</div>
  </section>
  <section class="login-panel"><div class="login-card">
   <h2>Accedi alla demo</h2><p>Scegli un profilo per vedere esattamente cosa può fare ogni livello della gerarchia.</p>
@@ -351,124 +350,114 @@ function openShipmentDetail(id){
    }else toast('Lo stato è già aggiornato');
  });
 }
+function apiBackendBase(){
+ const meta=document.querySelector('meta[name="aps-backend-url"]');
+ return (meta?.content||'').replace(/\/$/,'');
+}
+function shipmentApiLinked(s){return !!(s&&(s.apiLinked||s.externalId||s.providerShipmentId||s.moovId))}
+function shipmentExternalId(s){return s?.externalId||s?.providerShipmentId||s?.moovId||''}
+function shipmentActionsHtml(s){
+ const linked=shipmentApiLinked(s);
+ return `<div class="ship-actions">
+   <button class="ship-action primary" title="Scarica etichetta PDF" onclick="printShippingLabel('${esc(s.id)}')">⬇ <span>Scarica etichetta PDF</span></button>
+   <button class="ship-action" title="Visualizza tutti i dettagli" onclick="openShipmentDetail('${esc(s.id)}')">👁 <span>Visualizza spedizione</span></button>
+   <button class="ship-action danger" title="Elimina o annulla spedizione" onclick="deleteShipment('${esc(s.id)}')">🗑 <span>Elimina</span></button>
+   <span class="api-pill ${linked?'live':''}">${linked?'● API collegata':'○ Demo locale'}</span>
+ </div>`;
+}
+async function deleteShipment(id){
+ const s=visibleShipments().find(x=>x.id===id)||state.shipments.find(x=>x.id===id);
+ if(!s)return;
+ const linked=shipmentApiLinked(s);
+ if(linked){
+   const base=apiBackendBase();
+   if(!base){toast('Backend APS non configurato','error');return}
+   if(!confirm(`Vuoi richiedere l'annullamento della spedizione ${s.id}?`))return;
+   try{
+     const ext=shipmentExternalId(s);
+     const r=await fetch(`${base}/api/shipments/${encodeURIComponent(s.carrier)}/${encodeURIComponent(ext)}`,{method:'DELETE'});
+     const d=await r.json().catch(()=>({}));
+     if(!r.ok)throw new Error(d.error||d.message||`Errore ${r.status}`);
+     s.status=moovStatusToLocal(d.stato??d.status??'Annullata');
+     s.events=Array.isArray(s.events)?s.events:shipmentEvents(s);
+     s.events.push({status:s.status,date:new Date().toISOString().slice(0,10),note:'Annullamento richiesto tramite API'});
+     save();toast('Richiesta di annullamento inviata');render();
+   }catch(e){toast(e.message||'Annullamento non riuscito','error')}
+   return;
+ }
+ if(!confirm(`Vuoi eliminare la spedizione demo ${s.id}?`))return;
+ const i=state.shipments.findIndex(x=>x.id===id);
+ if(i>=0)state.shipments.splice(i,1);
+ save();toast('Spedizione demo eliminata');render();
+}
+function pdfEscapeText(v){
+ return String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\x20-\x7E]/g,' ').replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)');
+}
+function buildSimplePdf(lines){
+ const W=298,H=420;
+ let content="BT\n/F1 11 Tf\n", y=H-28;
+ for(const item of lines){
+   const size=item.size||9, font=item.bold?'/F2':'/F1';
+   content+=`${font} ${size} Tf\n1 0 0 1 ${item.x||20} ${y} Tm (${pdfEscapeText(item.text)}) Tj\n`;
+   y-=item.gap||14;
+ }
+ content+="ET\n";
+ const objs=[];
+ const add=s=>{objs.push(s);return objs.length};
+ const f1=add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+ const f2=add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+ const stream=add(`<< /Length ${content.length} >>\nstream\n${content}endstream`);
+ const page=add(`<< /Type /Page /Parent 5 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >> >> /Contents ${stream} 0 R >>`);
+ const pages=add(`<< /Type /Pages /Kids [${page} 0 R] /Count 1 >>`);
+ const catalog=add(`<< /Type /Catalog /Pages ${pages} 0 R >>`);
+ let out="%PDF-1.4\n", offsets=[0];
+ objs.forEach((o,i)=>{offsets.push(out.length);out+=`${i+1} 0 obj\n${o}\nendobj\n`;});
+ const xref=out.length;
+ out+=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`;
+ for(let i=1;i<offsets.length;i++)out+=String(offsets[i]).padStart(10,'0')+" 00000 n \n";
+ out+=`trailer\n<< /Size ${objs.length+1} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF`;
+ return new Blob([out],{type:'application/pdf'});
+}
 function printShippingLabel(id){
  const s=visibleShipments().find(x=>x.id===id)||state.shipments.find(x=>x.id===id); if(!s)return;
  const base=apiBackendBase();
 
- // Spedizione reale collegata via API: il PDF deve arrivare dal provider/backend.
  if(shipmentApiLinked(s)){
-   if(!base){
-     toast('Etichetta reale non disponibile: collega prima il backend/API del provider','error');
-     return;
-   }
+   if(!base){toast('Backend API non configurato: etichetta reale non disponibile','error');return}
    const ext=shipmentExternalId(s);
    const a=document.createElement('a');
-   a.href=`${base}/api/moov/shipments/${encodeURIComponent(s.carrier)}/${encodeURIComponent(ext)}/label`;
-   a.target='_blank';
-   a.rel='noopener';
-   document.body.appendChild(a);
-   a.click();
-   a.remove();
+   a.href=`${base}/api/shipments/${encodeURIComponent(s.carrier)}/${encodeURIComponent(ext)}/label`;
+   a.target='_blank'; a.rel='noopener';
+   document.body.appendChild(a); a.click(); a.remove();
    return;
  }
 
- // Spedizione demo: crea e scarica un vero PDF nel browser.
- if(!window.jspdf || !window.jspdf.jsPDF){
-   toast('Modulo PDF non caricato. Aggiorna la pagina e riprova.','error');
-   return;
- }
- const {jsPDF}=window.jspdf;
- const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a6'});
  const sender=s.sender||{};
- const pageW=105, margin=7, contentW=pageW-margin*2;
-
- doc.setDrawColor(20);
- doc.setLineWidth(.5);
- doc.rect(4,4,97,140);
-
- doc.setFont('helvetica','bold');
- doc.setFontSize(15);
- doc.text('APS CORRIERE',margin,12);
- doc.setFontSize(13);
- doc.text(String(s.carrier||''),pageW-margin,12,{align:'right'});
-
- doc.setLineWidth(.35);
- doc.line(margin,16,pageW-margin,16);
-
- doc.setFontSize(8);
- doc.setFont('helvetica','normal');
- doc.text('SPEDIZIONE',margin,21);
- doc.setFont('helvetica','bold');
- doc.setFontSize(11);
- doc.text(String(s.id||''),margin,27);
-
- doc.setFontSize(7);
- doc.setFont('helvetica','normal');
- doc.text('MITTENTE',margin,34);
- doc.setFontSize(8.5);
- doc.setFont('helvetica','bold');
- doc.text(String(sender.name||'Mittente'),margin,39,{maxWidth:contentW});
- doc.setFont('helvetica','normal');
- let y=44;
- const senderLines=[
-   sender.address||'',
-   [sender.zip,sender.city,sender.province].filter(Boolean).join(' '),
-   sender.phone||''
- ].filter(Boolean);
- senderLines.forEach(t=>{doc.text(String(t),margin,y,{maxWidth:contentW});y+=4;});
-
- y+=2;
- doc.line(margin,y,pageW-margin,y); y+=5;
- doc.setFontSize(7);
- doc.text('DESTINATARIO',margin,y); y+=5;
- doc.setFontSize(11);
- doc.setFont('helvetica','bold');
- const recLines=doc.splitTextToSize(String(s.recipient||''),contentW);
- doc.text(recLines,margin,y); y+=recLines.length*5;
- doc.setFontSize(8.5);
- doc.setFont('helvetica','normal');
- const destLines=[
-   s.address||'',
-   [s.zip,s.city,s.province].filter(Boolean).join(' ') || s.city || '',
-   s.phone||''
- ].filter(Boolean);
- destLines.forEach(t=>{doc.text(String(t),margin,y,{maxWidth:contentW});y+=4.5;});
-
- y+=2;
- doc.line(margin,y,pageW-margin,y); y+=5;
-
- // Barcode-like visual (demo)
- const bx=margin, by=y, bh=16;
- let x=bx;
- const code=String(s.tracking||s.id||'APS');
- for(let i=0;i<code.length*3 && x<pageW-margin;i++){
-   const w=((code.charCodeAt(i%code.length)+i)%3===0)?1.1:.45;
-   if(i%2===0){doc.setFillColor(0);doc.rect(x,by,w,bh,'F');}
-   x+=w+.55;
- }
- y+=bh+4;
- doc.setFont('courier','bold');
- doc.setFontSize(9);
- doc.text(String(s.tracking||s.id||''),pageW/2,y,{align:'center'}); y+=7;
-
- doc.setFont('helvetica','normal');
- doc.setFontSize(8);
- const meta=[
-   `Colli: ${s.parcels||1}`,
-   `Peso: ${s.chargeableWeight||s.weight||'—'} kg`,
-   `Rif.: ${s.reference||'—'}`,
-   `COD: ${s.cod?money(s.cod):'NO'}`
+ const lines=[
+   {text:'APS CORRIERE',size:18,bold:true,gap:20},
+   {text:`ETICHETTA DEMO - ${s.carrier||''}`,size:11,bold:true,gap:18},
+   {text:`Spedizione: ${s.id}`,size:10,bold:true},
+   {text:`Tracking: ${s.tracking||s.id}`,size:9,gap:18},
+   {text:'MITTENTE',size:8,bold:true},
+   {text:sender.name||'Mittente',size:10,bold:true},
+   {text:sender.address||''},
+   {text:[sender.zip,sender.city,sender.province].filter(Boolean).join(' ')||'',gap:18},
+   {text:'DESTINATARIO',size:8,bold:true},
+   {text:s.recipient||'',size:12,bold:true},
+   {text:s.address||''},
+   {text:[s.zip,s.city,s.province].filter(Boolean).join(' ')||s.city||''},
+   {text:s.phone||'',gap:18},
+   {text:`Colli: ${s.parcels||1}    Peso: ${s.chargeableWeight||s.weight||'-'} kg`},
+   {text:`Riferimento: ${s.reference||'-'}`},
+   {text:`Contrassegno: ${s.cod?money(s.cod):'NO'}`,gap:18},
+   {text:'ETICHETTA DEMO - NON VALIDA PER IL TRASPORTO',size:7,bold:true}
  ];
- meta.forEach((t,i)=>{
-   const col=i%2,row=Math.floor(i/2);
-   doc.text(t,margin+col*46,y+row*5);
- });
- y+=13;
- doc.setFontSize(6.5);
- doc.setTextColor(90);
- doc.text('ETICHETTA DEMO - non valida per il trasporto finché non generata dal provider via API reale.',margin,y,{maxWidth:contentW});
-
- doc.save(`etichetta-${String(s.id||'spedizione')}.pdf`);
+ const blob=buildSimplePdf(lines);
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');
+ a.href=url; a.download=`etichetta-${s.id}.pdf`;
+ document.body.appendChild(a); a.click(); a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),2000);
  toast('Etichetta PDF scaricata');
 }
 
