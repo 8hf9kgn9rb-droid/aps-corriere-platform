@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>APS Corriere Platform v0.8.1</title>
+  <title>APS Corriere Platform v0.8.3</title>
   <meta name="description" content="Piattaforma APS Corriere con gerarchia Super Master, Master e Cliente." />
   <meta name="aps-backend-url" content="https://aps-api-production.up.railway.app" />
   <style>
@@ -152,6 +152,35 @@ textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:11px
   .nav-section{padding-top:7px}
 }
 
+
+/* v0.8.3 - ticket form stile dedicato */
+.ticket-compose{background:white;border:1px solid var(--line);border-radius:18px;padding:26px;max-width:960px}
+.ticket-compose h3{margin:0 0 24px;font-size:20px}
+.ticket-compose .field{margin-bottom:18px}
+.ticket-compose .field label{font-size:14px;color:#222;font-weight:800}
+.ticket-required{color:#e02929;font-weight:900}
+.ticket-compose input,.ticket-compose textarea,.ticket-compose select{
+  font-size:15px;padding:15px 16px;border-radius:10px
+}
+.ticket-compose textarea{min-height:145px}
+.ticket-drop{
+  position:relative;border:2px dashed #cfd5df;border-radius:12px;background:#fbfcfe;
+  min-height:82px;display:flex;align-items:center;justify-content:center;text-align:center;
+  color:#666;padding:16px;transition:.2s
+}
+.ticket-drop.dragover{border-color:#7da2ff;background:#f1f6ff}
+.ticket-drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.ticket-drop strong{display:block;color:#374151;margin-bottom:4px}
+.ticket-files{display:grid;gap:8px;margin-top:10px}
+.ticket-file{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:white;font-size:11px}
+.ticket-file .grow{font-size:11px}
+.ticket-file button{margin-left:auto;border:0;background:transparent;color:var(--danger);font-weight:800}
+.ticket-submit{min-width:170px;background:#ff6a00;color:white}
+.ticket-submit:hover{background:#e85f00}
+.ticket-page-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;align-items:start}
+.ticket-list-panel{margin-top:20px}
+@media(max-width:1050px){.ticket-page-grid{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
@@ -248,7 +277,22 @@ function loadState(){
  for(const k of ['users','shipments','transactions','cod','pickups','holds','tickets','providers','tariffs']){
    if(!Array.isArray(data[k]))data[k]=base[k];
  }
- data.settings={...base.settings,...(saved.settings||{})};
+ 
+data.settings={...base.settings,...(saved.settings||{})};
+
+// v0.8.2: mantieni solo ticket aperti manualmente da utenti e normalizza gli stati.
+data.tickets=(Array.isArray(data.tickets)?data.tickets:[])
+ .filter(t=>t && t.requesterId!=='system' && t.auto!==true)
+ .map(t=>({
+   ...t,
+   auto:false,
+   source:'Manuale',
+   provider:undefined,
+   status:t.status==='In attesa Super Master'?'In attesa Super Master':
+          t.status==='Inviato'?'Inviato':
+          (t.status||'In attesa Super Master')
+ }));
+
 
  // Migrazione utenti
  data.users=data.users.map(u=>({
@@ -318,107 +362,91 @@ function visibleTickets(user=me()){
  return rows.filter(t=>t.clientId===user.id||t.requesterId===user.id);
 }
 function ticketStatusClass(s){
- if(['Risolto','Chiuso','Inviato a Moov'].includes(s))return'ok';
- if(['In attesa invio Moov','Escalato al Super Master','In gestione'].includes(s))return'warn';
+ if(['Risolto','Chiuso','Inviato'].includes(s))return'ok';
+ if(['In attesa Super Master','Pronto per invio','Invio non disponibile','In gestione'].includes(s))return'warn';
  return'info';
-}
-function ticketOpenForShipment(shipmentId,category){
- return (state.tickets||[]).find(t=>t.shipmentId===shipmentId&&t.category===category&&!['Risolto','Chiuso'].includes(t.status));
 }
 function ticketHistoryPush(t,actor,text,stage=''){
  t.history=Array.isArray(t.history)?t.history:[];
  t.history.push({at:new Date().toISOString(),actor,stage,text});
  t.updated=new Date().toISOString();
 }
-function buildTicket({shipmentId='',category='Altro',subject='',message='',source='Manuale',auto=false}={}){
+function buildTicket({shipmentId='',category='Altro',subject='',message=''}={}){
  const u=me();
  const s=shipmentId?state.shipments.find(x=>x.id===shipmentId):null;
  const clientId=s?.ownerId||(u.role==='client'?u.id:null);
  const client=state.users.find(x=>x.id===clientId);
  const masterId=s?.masterId||client?.parentId||(u.role==='master'?u.id:null);
  const master=state.users.find(x=>x.id===masterId);
+
  const t={
    id:'TCK'+Date.now().toString().slice(-8)+Math.random().toString(36).slice(2,4).toUpperCase(),
    requesterId:u.id,
    clientId:clientId||null,
    masterId:masterId||null,
    shipmentId:shipmentId||null,
-   category,subject:subject||category,message:message||'',
-   source,auto,
-   status:'Aperto',
-   provider:'MoovExpress',
+   category,
+   subject:subject||category,
+   message:message||'',
+   source:'Manuale',
+   auto:false,
+   status:u.role==='super'?'Pronto per invio':'In attesa Super Master',
    externalTicketId:null,
    created:new Date().toISOString(),
    updated:new Date().toISOString(),
    history:[]
  };
+
  ticketHistoryPush(t,u.company||u.name,`Ticket aperto da ${roleLabel(u.role)}`,'apertura');
+
  if(u.role==='client'&&master){
-   ticketHistoryPush(t,master.company||master.name,'Ticket notificato automaticamente al Master','master');
+   ticketHistoryPush(t,master.company||master.name,'Ticket visibile al Master di riferimento','master');
  }
  if(u.role!=='super'){
-   ticketHistoryPush(t,'APS Corriere','Ticket escalato automaticamente al Super Master','super');
+   ticketHistoryPush(t,'Super Master','Ticket ricevuto e in attesa di invio','super');
  }
- t.status='In attesa invio Moov';
  return t;
 }
-function ensureAutomaticTickets(){
- const tickets=state.tickets||[];
- let changed=false;
- for(const s of state.shipments){
-   if(s.status==='Giacenza'&&!ticketOpenForShipment(s.id,'Giacenza')){
-     const client=state.users.find(x=>x.id===s.ownerId);
-     const master=state.users.find(x=>x.id===s.masterId);
-     const t={
-       id:'TCK'+Date.now().toString().slice(-8)+Math.random().toString(36).slice(2,4).toUpperCase(),
-       requesterId:'system',
-       clientId:s.ownerId||null, masterId:s.masterId||client?.parentId||null,
-       shipmentId:s.id, category:'Giacenza',
-       subject:`Giacenza spedizione ${s.id}`,
-       message:`La spedizione ${s.id} risulta in giacenza. Richiesta assistenza generata automaticamente.`,
-       source:'Automatico',auto:true,status:'In attesa invio Moov',
-       provider:'MoovExpress',externalTicketId:null,
-       created:new Date().toISOString(),updated:new Date().toISOString(),
-       history:[
-         {at:new Date().toISOString(),actor:'APS Corriere',stage:'rilevamento',text:'Giacenza rilevata automaticamente'},
-         ...(master?[{at:new Date().toISOString(),actor:master.company||master.name,stage:'master',text:'Master notificato automaticamente'}]:[]),
-         {at:new Date().toISOString(),actor:'APS Corriere',stage:'super',text:'Escalato automaticamente al Super Master'}
-       ]
-     };
-     tickets.unshift(t);changed=true;
-   }
- }
- if(changed){state.tickets=tickets;save()}
-}
-async function dispatchTicketToProvider(t,silent=false){
+async function sendTicketExternally(t){
  if(!t)return false;
+ if(me().role!=='super'){
+   toast('Solo il Super Master può inviare la segnalazione','error');
+   return false;
+ }
  const h=await checkBackend(true);
  if(!h.online||!h.live){
-   t.status='In attesa invio Moov';
-   if(!silent)toast('Ticket pronto: backend live non ancora attivo per i ticket','error');
-   save();return false;
+   t.status='Invio non disponibile';
+   ticketHistoryPush(t,'Super Master','Tentativo di invio non completato: canale esterno non disponibile','invio');
+   save();
+   toast('Il ticket resta salvato. Il canale di invio esterno non è ancora disponibile.','error');
+   return false;
  }
  try{
    const s=t.shipmentId?state.shipments.find(x=>x.id===t.shipmentId):null;
    const payload={
-     ticketId:t.id,shipmentId:t.shipmentId,tracking:s?.tracking||null,carrier:s?.carrier||null,
-     category:t.category,subject:t.subject,message:t.message,
+     ticketId:t.id,
+     shipmentId:t.shipmentId,
+     tracking:s?.tracking||null,
+     carrier:s?.carrier||null,
+     category:t.category,
+     subject:t.subject,
+     message:t.message,
      requester:state.users.find(x=>x.id===t.requesterId)?.company||t.requesterId,
      client:state.users.find(x=>x.id===t.clientId)?.company||null,
      master:state.users.find(x=>x.id===t.masterId)?.company||null
    };
    const d=await apiJson('/api/support/tickets',{method:'POST',body:JSON.stringify(payload)});
    t.externalTicketId=d.id||d.ticketId||d.externalTicketId||null;
-   t.status='Inviato a Moov';
-   ticketHistoryPush(t,'APS Corriere',`Ticket inviato automaticamente a MoovExpress${t.externalTicketId?' · ID '+t.externalTicketId:''}`,'provider');
+   t.status='Inviato';
+   ticketHistoryPush(t,'Super Master',`Segnalazione inviata${t.externalTicketId?' · ID '+t.externalTicketId:''}`,'invio');
    save();
-   if(!silent)toast('Ticket inviato a MoovExpress');
+   toast('Segnalazione inviata');
    return true;
  }catch(e){
-   t.status='In attesa invio Moov';
-   ticketHistoryPush(t,'APS Corriere',`Invio automatico non completato: ${e.message}`,'provider-pending');
+   t.status='Invio non disponibile';
+   ticketHistoryPush(t,'Super Master',`Invio non completato: ${e.message}`,'invio');
    save();
-   if(!silent)toast('Ticket salvato. Invio a Moov in attesa del canale API ticket','error');
+   toast('Il ticket resta salvato. Invio esterno non completato.','error');
    return false;
  }
 }
@@ -444,7 +472,7 @@ function render(){
      localStorage.removeItem('aps_session');
      session=null;
    }
-   if(session)ensureAutomaticTickets();app.innerHTML=session?appShell():loginPage();
+   app.innerHTML=session?appShell():loginPage();
    bindCommon();
  }catch(err){
    console.error('APS render error',err);
@@ -478,7 +506,7 @@ function loginPage(){return `
  <section class="login-brand">
   <div class="brand-lockup"><div class="brand-mark">APS</div><div>APS Corriere Platform</div></div>
   <div class="login-copy"><div class="eyebrow">Piattaforma logistica multi-livello</div><h1>Spedisci, gestisci e rivendi da un unico pannello.</h1><p>Una piattaforma originale per la rete APS Corriere: listini, credito, spedizioni, tracking e controllo gerarchico dal Super Master fino al Cliente.</p><div class="hierarchy"><span>Super Master</span><b>→</b><span>Master</span><b>→</b><span>Cliente</span></div></div>
-  <div class="login-foot">Versione 0.8.1 • dettaglio spedizione, tracking storico ed etichetta stampabile • dati salvati nel browser</div>
+  <div class="login-foot">Versione 0.8.3 • dettaglio spedizione, tracking storico ed etichetta stampabile • dati salvati nel browser</div>
  </section>
  <section class="login-panel"><div class="login-card">
   <h2>Accedi alla demo</h2><p>Scegli un profilo per vedere esattamente cosa può fare ogni livello della gerarchia.</p>
@@ -605,8 +633,8 @@ function apiBackendBase(){
  const meta=document.querySelector('meta[name="aps-backend-url"]');
  return (meta?.content||'').replace(/\/$/,'');
 }
-function shipmentApiLinked(s){return !!(s&&(s.apiLinked||s.externalId||s.providerShipmentId||s.moovId))}
-function shipmentExternalId(s){return s?.externalId||s?.providerShipmentId||s?.moovId||''}
+function shipmentApiLinked(s){return !!(s&&(s.apiLinked||s.externalId||s.providerShipmentId))}
+function shipmentExternalId(s){return s?.externalId||s?.providerShipmentId||''}
 function shipmentActionsHtml(s){
  const linked=shipmentApiLinked(s);
  return `<div class="ship-actions">
@@ -630,7 +658,7 @@ async function deleteShipment(id){
      const r=await fetch(`${base}/api/shipments/${encodeURIComponent(s.carrier)}/${encodeURIComponent(ext)}`,{method:'DELETE'});
      const d=await r.json().catch(()=>({}));
      if(!r.ok)throw new Error(d.error||d.message||`Errore ${r.status}`);
-     s.status=moovStatusToLocal(d.stato??d.status??'Annullata');
+     s.status=providerStatusToLocal(d.stato??d.status??'Annullata');
      s.events=Array.isArray(s.events)?s.events:shipmentEvents(s);
      s.events.push({status:s.status,date:new Date().toISOString().slice(0,10),note:'Annullamento richiesto tramite API'});
      save();toast('Richiesta di annullamento inviata');render();
@@ -831,97 +859,192 @@ function visibleHolds(){const ids=descendants(me());return (state.holds||[]).fil
 function holdsPage(){const rows=visibleHolds();return `${pageHead('Giacenze e resi','Gestisci anomalie, riconsegne e rientri al mittente.')}${rows.length?`<div class="cards">${rows.map(h=>{const sh=state.shipments.find(s=>s.id===h.shipment);return `<div class="entity-card"><div class="entity-top"><div class="circle">↺</div><div><h4>${h.shipment}</h4><p>${sh?.recipient||'-'} · ${sh?.city||'-'} · ${h.reason}</p></div></div><div class="entity-meta"><div class="meta-box"><span>Data</span><strong>${dateFmt(h.date)}</strong></div><div class="meta-box"><span>Stato</span><strong>${h.status}</strong></div></div><div class="entity-actions">${h.action?`<span class="tag blue">${h.action}</span>`:`<button class="btn btn-soft holdAction" data-id="${h.id}" data-action="Riconsegna">Riconsegna</button><button class="btn btn-secondary holdAction" data-id="${h.id}" data-action="Reso al mittente">Reso</button><button class="btn btn-secondary" onclick="openTicketModal('${h.shipment}','Giacenza')">✉ Ticket</button>`}</div></div>`}).join('')}</div>`:`<div class="panel"><div class="panel-body"><div class="empty"><strong>Nessuna giacenza</strong>Non ci sono anomalie da gestire nel tuo perimetro.</div></div></div>`}`}
 
 
+function ticketAttachmentNames(t){
+ return Array.isArray(t.attachments)?t.attachments:[];
+}
 function ticketRowHtml(t){
  const s=t.shipmentId?state.shipments.find(x=>x.id===t.shipmentId):null;
- const client=state.users.find(x=>x.id===t.clientId), master=state.users.find(x=>x.id===t.masterId);
+ const client=state.users.find(x=>x.id===t.clientId);
+ const master=state.users.find(x=>x.id===t.masterId);
+ const canSend=me().role==='super'&&!['Risolto','Chiuso','Inviato'].includes(t.status);
+
  return `<div class="ticket-card">
    <div class="ticket-card-head">
-     <div><h4>${esc(t.subject)}</h4><p>${esc(t.message||'Nessun messaggio')}</p></div>
+     <div>
+       <h4>${esc(t.subject||('Ticket '+t.id))}</h4>
+       <p>${esc(t.message||'Nessun messaggio')}</p>
+     </div>
      <span class="ticket-chip ${ticketStatusClass(t.status)}">${esc(t.status)}</span>
    </div>
    <div class="ticket-meta">
-     <span class="ticket-chip info">${esc(t.category)}</span>
+     ${t.ldv?`<span class="ticket-chip info">LDV: ${esc(t.ldv)}</span>`:''}
      ${s?`<span class="ticket-chip">${esc(s.id)} · ${esc(s.tracking)}</span>`:''}
      ${client?`<span class="ticket-chip">Cliente: ${esc(client.company)}</span>`:''}
      ${master?`<span class="ticket-chip">Master: ${esc(master.company)}</span>`:''}
-     <span class="ticket-chip">${t.auto?'Automatico':'Manuale'}</span>
+     ${t.content?`<span class="ticket-chip">Contenuto: ${esc(t.content)}</span>`:''}
+     ${t.packaging?`<span class="ticket-chip">Imballaggio: ${esc(t.packaging)}</span>`:''}
    </div>
-   <div class="ticket-history">${(t.history||[]).slice(-5).map(h=>`<div class="ticket-history-row"><div class="ticket-history-dot"></div><div><strong>${esc(h.actor)}</strong><span>${esc(h.text)} · ${esc(new Date(h.at).toLocaleString('it-IT'))}</span></div></div>`).join('')}</div>
+   ${ticketAttachmentNames(t).length?`<div class="ticket-meta">${ticketAttachmentNames(t).map(a=>`<span class="ticket-chip">📎 ${esc(a.name)}</span>`).join('')}</div>`:''}
+   <div class="ticket-history">
+     ${(t.history||[]).slice(-6).map(h=>`<div class="ticket-history-row">
+       <div class="ticket-history-dot"></div>
+       <div><strong>${esc(h.actor)}</strong><span>${esc(h.text)} · ${esc(new Date(h.at).toLocaleString('it-IT'))}</span></div>
+     </div>`).join('')}
+   </div>
    <div class="entity-actions">
-     ${t.status!=='Risolto'?`<button class="btn btn-soft ticketRetry" data-id="${t.id}">Invia / Riprova Moov</button>`:''}
-     ${me().role!=='client'&&t.status!=='Risolto'?`<button class="btn btn-secondary ticketResolve" data-id="${t.id}">Segna risolto</button>`:''}
-     ${t.externalTicketId?`<span class="tag blue">Moov #${esc(t.externalTicketId)}</span>`:''}
+     ${canSend?`<button class="btn btn-primary ticketSend" data-id="${t.id}">Invia segnalazione</button>`:''}
+     ${me().role==='super'&&t.status!=='Risolto'?`<button class="btn btn-secondary ticketResolve" data-id="${t.id}">Segna risolto</button>`:''}
+     ${t.externalTicketId?`<span class="tag blue">ID ${esc(t.externalTicketId)}</span>`:''}
    </div>
  </div>`;
 }
 function ticketsPage(){
- ensureAutomaticTickets();
  const rows=visibleTickets().sort((a,b)=>new Date(b.updated)-new Date(a.updated));
  const open=rows.filter(t=>!['Risolto','Chiuso'].includes(t.status)).length;
- const auto=rows.filter(t=>t.auto).length;
- return `${pageHead('Assistenza / Ticket','Ticket collegati alle spedizioni con inoltro gerarchico automatico.',`<button class="btn btn-primary" id="newTicketBtn">＋ Apri ticket</button>`)}
+ const waiting=rows.filter(t=>t.status==='In attesa Super Master').length;
+ const sent=rows.filter(t=>t.status==='Inviato').length;
+
+ const canOpen=me().role==='client'||me().role==='master';
+ const compose=canOpen?`<div class="ticket-compose">
+   <h3>Nuovo ticket</h3>
+   <form id="ticketInlineForm">
+     <div class="field">
+       <label>LDV</label>
+       <input id="ticketLDV" placeholder="Numero LDV della spedizione">
+     </div>
+     <div class="field">
+       <label>Contenuto <span class="ticket-required">* obbligatorio</span></label>
+       <input id="ticketContent" required placeholder="Cosa c'era nel collo (es. 2 vasi in ceramica)">
+     </div>
+     <div class="field">
+       <label>Imballaggio <span class="ticket-required">* obbligatorio</span></label>
+       <input id="ticketPackaging" required placeholder="Com'era imballato (es. scatola doppia con pluriball)">
+     </div>
+     <div class="field">
+       <label>Messaggio <span class="ticket-required">*</span></label>
+       <textarea id="ticketMessage" required placeholder="Descrivi il problema o la richiesta..."></textarea>
+     </div>
+     <div class="field">
+       <label>Allegati (foto/PDF)</label>
+       <div class="ticket-drop" id="ticketDrop">
+         <input id="ticketFiles" type="file" multiple accept="image/*,.pdf,application/pdf">
+         <div><strong>📎 Trascina qui foto o PDF, oppure clicca per scegliere</strong><span class="small muted">Puoi allegare più file</span></div>
+       </div>
+       <div id="ticketFilesList" class="ticket-files"></div>
+     </div>
+     <button class="btn ticket-submit" type="submit">Invia ticket</button>
+   </form>
+ </div>`:'';
+
+ return `${pageHead(
+   'Assistenza — Ticket',
+   canOpen?'Apri un ticket: puoi allegare foto o PDF.':'Gestione ticket ricevuti da Cliente e Master.',
+   ''
+ )}
  <div class="kpi-grid">
    ${kpi('Ticket visibili',rows.length,'✉','Nel tuo perimetro')}
    ${kpi('Ticket aperti',open,'!','Da gestire')}
-   ${kpi('Generati automaticamente',auto,'↺','Giacenze rilevate')}
-   ${kpi('Inviati a Moov',rows.filter(t=>t.status==='Inviato a Moov').length,'✓','Canale provider')}
+   ${kpi('In attesa Super Master',waiting,'⌛','Da verificare')}
+   ${kpi('Segnalazioni inviate',sent,'✓','Completate')}
  </div>
- <div class="ticket-grid">
-   <div class="ticket-list">${rows.map(ticketRowHtml).join('')||'<div class="panel"><div class="panel-body"><div class="empty"><strong>Nessun ticket</strong>Apri una richiesta su una spedizione.</div></div></div>'}</div>
-   <div class="ticket-side-note">
-     <h4>Flusso automatico APS</h4>
-     <div class="ticket-flow">
-       <div class="ticket-flow-step"><b>1</b><span>Cliente apre ticket sulla spedizione</span></div>
-       <div class="ticket-flow-step"><b>2</b><span>Il Master viene notificato automaticamente</span></div>
-       <div class="ticket-flow-step"><b>3</b><span>Il ticket viene escalato automaticamente al Super Master</span></div>
-       <div class="ticket-flow-step"><b>4</b><span>APS tenta l'invio automatico al canale ticket MoovExpress</span></div>
+ <div class="ticket-page-grid">
+   <div>
+     ${compose}
+     <div class="ticket-list-panel">
+       <div class="ticket-list">${rows.map(ticketRowHtml).join('')||'<div class="panel"><div class="panel-body"><div class="empty"><strong>Nessun ticket</strong>Non ci sono ancora richieste.</div></div></div>'}</div>
      </div>
-     <div class="notice" style="margin-top:14px">Le giacenze generano già un ticket interno automatico. L'invio finale a MoovExpress si attiva quando il loro canale/API ticket è disponibile nel backend.</div>
+   </div>
+   <div class="ticket-side-note">
+     <h4>Flusso ticket APS</h4>
+     <div class="ticket-flow">
+       <div class="ticket-flow-step"><b>1</b><span>Cliente o Master compila e invia il ticket</span></div>
+       <div class="ticket-flow-step"><b>2</b><span>Il ticket arriva al Super Master</span></div>
+       <div class="ticket-flow-step"><b>3</b><span>Il Super Master controlla la richiesta</span></div>
+       <div class="ticket-flow-step"><b>4</b><span>Il Super Master invia la segnalazione</span></div>
+     </div>
    </div>
  </div>`;
 }
-function openTicketModal(shipmentId='',presetCategory=''){
- const ships=visibleShipments();
- const options=ships.map(s=>`<option value="${esc(s.id)}" ${s.id===shipmentId?'selected':''}>${esc(s.id)} · ${esc(s.recipient)} · ${esc(s.status)}</option>`).join('');
- const html=`<div class="modal-backdrop" id="ticketModalBg"><div class="modal">
-   <div class="modal-head"><div><h3>Apri ticket assistenza</h3><div class="small muted">Il ticket seguirà automaticamente Cliente → Master → Super Master → MoovExpress.</div></div><button class="modal-close" id="ticketModalClose">×</button></div>
-   <form id="ticketForm"><div class="modal-body">
-     <div class="field"><label>Spedizione</label><select id="ticketShipment"><option value="">Nessuna spedizione specifica</option>${options}</select></div>
-     <div class="field"><label>Categoria</label><select id="ticketCategory">
-       ${['Sollecito','Giacenza','Mancata consegna','POD / Prova di consegna','Danno / Anomalia','Altro'].map(x=>`<option ${x===presetCategory?'selected':''}>${x}</option>`).join('')}
-     </select></div>
-     <div class="field"><label>Oggetto</label><input id="ticketSubject" required placeholder="Es. Sollecito spedizione"></div>
-     <div class="field"><label>Messaggio</label><textarea id="ticketMessage" required placeholder="Descrivi il problema o la richiesta"></textarea></div>
-   </div><div class="modal-foot"><button type="button" class="btn btn-secondary" id="ticketModalCancel">Annulla</button><button class="btn btn-primary" type="submit">Invia ticket</button></div></form>
- </div></div>`;
- document.body.insertAdjacentHTML('beforeend',html);
- const close=()=>document.getElementById('ticketModalBg')?.remove();
- ticketModalClose.onclick=close;ticketModalCancel.onclick=close;
- document.getElementById('ticketForm').onsubmit=async e=>{
+function guessShipmentByLDV(ldv){
+ const q=String(ldv||'').trim().toLowerCase();
+ if(!q)return null;
+ return state.shipments.find(s=>
+   String(s.id||'').toLowerCase()===q ||
+   String(s.tracking||'').toLowerCase()===q ||
+   String(s.reference||'').toLowerCase()===q
+ )||null;
+}
+function initTicketInlineForm(){
+ const form=document.getElementById('ticketInlineForm');
+ if(!form)return;
+ let files=[];
+ const input=document.getElementById('ticketFiles');
+ const drop=document.getElementById('ticketDrop');
+ const list=document.getElementById('ticketFilesList');
+
+ const renderFiles=()=>{
+   list.innerHTML=files.map((f,i)=>`<div class="ticket-file"><span>📎</span><div class="grow"><strong>${esc(f.name)}</strong><span>${Math.max(1,Math.round(f.size/1024))} KB</span></div><button type="button" data-rm="${i}">Rimuovi</button></div>`).join('');
+   list.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{files.splice(+b.dataset.rm,1);renderFiles()});
+ };
+ const addFiles=(incoming)=>{
+   for(const f of Array.from(incoming||[])){
+     const ok=f.type.startsWith('image/')||f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');
+     if(!ok)continue;
+     if(f.size>10*1024*1024){toast(`File troppo grande: ${f.name}`,'error');continue}
+     if(files.length>=6){toast('Puoi allegare massimo 6 file','error');break}
+     files.push(f);
+   }
+   renderFiles();
+ };
+ input.addEventListener('change',()=>{addFiles(input.files);input.value=''});
+ ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('dragover')}));
+ ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('dragover')}));
+ drop.addEventListener('drop',e=>addFiles(e.dataTransfer.files));
+
+ form.onsubmit=e=>{
    e.preventDefault();
+   const ldv=document.getElementById('ticketLDV').value.trim();
+   const content=document.getElementById('ticketContent').value.trim();
+   const packaging=document.getElementById('ticketPackaging').value.trim();
+   const message=document.getElementById('ticketMessage').value.trim();
+   if(!content||!packaging||!message){toast('Compila i campi obbligatori','error');return}
+
+   const shipment=guessShipmentByLDV(ldv);
    const t=buildTicket({
-     shipmentId:ticketShipment.value,
-     category:ticketCategory.value,
-     subject:ticketSubject.value.trim(),
-     message:ticketMessage.value.trim(),
-     source:'Manuale',auto:false
+     shipmentId:shipment?.id||'',
+     category:'Assistenza',
+     subject:ldv?`Ticket LDV ${ldv}`:'Nuovo ticket assistenza',
+     message
    });
-   state.tickets.unshift(t);save();close();
-   toast('Ticket creato ed escalato automaticamente');
-   await dispatchTicketToProvider(t,true);
-   currentView='tickets';render();
+   t.ldv=ldv;
+   t.content=content;
+   t.packaging=packaging;
+   t.attachments=files.map(f=>({name:f.name,size:f.size,type:f.type||''}));
+   t.status='In attesa Super Master';
+
+   state.tickets.unshift(t);
+   save();
+   toast('Ticket inviato al Super Master');
+   currentView='tickets';
+   render();
  };
 }
 function resolveTicket(id){
- const t=(state.tickets||[]).find(x=>x.id===id);if(!t)return;
- t.status='Risolto';ticketHistoryPush(t,me().company||me().name,'Ticket segnato come risolto','chiusura');save();toast('Ticket risolto');render();
+ const t=(state.tickets||[]).find(x=>x.id===id);
+ if(!t)return;
+ t.status='Risolto';
+ ticketHistoryPush(t,me().company||me().name,'Ticket segnato come risolto','chiusura');
+ save();
+ toast('Ticket risolto');
+ render();
 }
+
 
 function providersPage(){
  if(me().role!=='super')return dashboardPage();
  const rows=state.providers||[];
  setTimeout(async()=>{const h=await checkBackend(true);const el=document.getElementById('backendState');if(el)el.innerHTML=h.online?(h.live?'<strong style="color:#17855c">● Backend online · API LIVE</strong>':'<strong style="color:#b76e00">● Backend online · LIVE disattivato per sicurezza</strong>'):'<strong style="color:#c43d3d">● Backend non raggiungibile</strong>'},0);
- return `${pageHead('Provider e API','MoovExpress collegato tramite backend APS.','<button class="btn btn-primary" id="syncProvidersBtn">Sincronizza provider</button>')}
+ return `${pageHead('Provider e API','Collegamenti esterni gestiti tramite backend APS.','<button class="btn btn-primary" id="syncProvidersBtn">Sincronizza provider</button>')}
  <div class="notice" id="backendState">Controllo backend APS…</div>
  <div class="cards">${rows.map(p=>`<div class="entity-card"><div class="entity-top"><div class="carrier-logo">${p.code}</div><div><h4>${p.contract||p.name}</h4><p>${p.apiConnected?'Collegato via API':`Modalità ${p.mode||'Demo'}`} · ${p.status}</p></div></div>
  <div class="entity-meta"><div class="meta-box"><span>Codice</span><strong>${p.code}</strong></div><div class="meta-box"><span>Credito provider</span><strong>${p.apiConnected?money(p.credit||0):'—'}</strong></div><div class="meta-box"><span>Account</span><strong>${p.account||'—'}</strong></div></div>
@@ -957,8 +1080,8 @@ function bindPage(){
  if(currentView==='pickups') document.getElementById('addPickupBtn')?.addEventListener('click',openPickupModal);
  if(currentView==='holds') document.querySelectorAll('.holdAction').forEach(b=>b.addEventListener('click',()=>manageHold(b.dataset.id,b.dataset.action)));
  if(currentView==='tickets'){
-   document.getElementById('newTicketBtn')?.addEventListener('click',()=>openTicketModal());
-   document.querySelectorAll('.ticketRetry').forEach(b=>b.addEventListener('click',async()=>{const t=(state.tickets||[]).find(x=>x.id===b.dataset.id);if(t){await dispatchTicketToProvider(t,false);render()}}));
+   initTicketInlineForm();
+   document.querySelectorAll('.ticketSend').forEach(b=>b.addEventListener('click',async()=>{const t=(state.tickets||[]).find(x=>x.id===b.dataset.id);if(t){await sendTicketExternally(t);render()}}));
    document.querySelectorAll('.ticketResolve').forEach(b=>b.addEventListener('click',()=>resolveTicket(b.dataset.id)));
  }
  if(currentView==='providers'){
@@ -983,7 +1106,7 @@ function bindTariffs(){
  });
 }
 
-function moovPayloadFromForm(){
+function providerPayloadFromForm(){
  const parcels=Math.max(1,+qParcels.value||1);
  const totalWeight=Math.max(.1,+qWeight.value||.1);
  const perPackage=+(totalWeight/parcels).toFixed(3);
@@ -1011,7 +1134,7 @@ function moovPayloadFromForm(){
    codValue:(+qCod.value||0)>0?(+qCod.value||0):undefined
  };
 }
-function moovStatusToLocal(s=''){
+function providerStatusToLocal(s=''){
  const v=String(s).toLowerCase();
  if(v.includes('consegn'))return'Consegnata';
  if(v.includes('giac')||v.includes('exception')||v.includes('non_consegn'))return'Giacenza';
@@ -1084,10 +1207,10 @@ function bindQuote(){
    let quotes=[];
 
    if(h.online&&h.live){
-     document.getElementById('quotes').innerHTML='<div class="notice">Calcolo tariffe reali MoovExpress…</div>';
+     document.getElementById('quotes').innerHTML='<div class="notice">Calcolo tariffe reali…</div>';
      for(const name of carriers){
        try{
-         const payload=moovPayloadFromForm();
+         const payload=providerPayloadFromForm();
          const d=await apiJson(`/api/rates/${encodeURIComponent(name)}`,{method:'POST',body:JSON.stringify({packages:payload.packages,shipTo:payload.shipTo,codValue:payload.codValue})});
          const providerCost=Number(d.prezzo??d.price??d.totale);
          if(!Number.isFinite(providerCost))continue;
@@ -1111,7 +1234,7 @@ function bindQuote(){
    document.getElementById('quotes').innerHTML=quotes.map((q,i)=>`<div class="quote">
      <div class="carrier-logo">${q.name}</div>
      <div class="details"><strong>${q.contract||q.name+' Standard'}</strong>
-     <span>${q.apiLive?'Tariffa reale MoovExpress':'Tariffa demo locale'} · peso tariffabile ${q.chargeableWeight.toFixed(2)} kg</span>
+     <span>${q.apiLive?'Tariffa reale':'Tariffa demo locale'} · peso tariffabile ${q.chargeableWeight.toFixed(2)} kg</span>
      ${me().role==='super'?`<span>Margine APS ${money(q.superMargin)} · margine Master ${money(q.masterMargin)}</span>`:me().role==='master'?`<span>Tuo costo ${money(q.masterCost)} · tuo margine ${money(q.masterMargin)}</span>`:''}</div>
      <div class="price"><strong>${money(q.clientPrice)}</strong><span>prezzo Cliente · IVA esclusa</span></div>
      <button class="btn btn-primary chooseQuote" data-i="${i}">${q.apiLive?'Crea spedizione reale':'Crea demo'}</button>
@@ -1133,15 +1256,15 @@ async function createShipment(q){
  let ext=null;
  if(q.apiLive){
    try{
-     toast('Invio a MoovExpress…');
-     ext=await apiJson(`/api/shipments/${encodeURIComponent(q.name)}`,{method:'POST',body:JSON.stringify(moovPayloadFromForm())});
+     toast('Invio spedizione…');
+     ext=await apiJson(`/api/shipments/${encodeURIComponent(q.name)}`,{method:'POST',body:JSON.stringify(providerPayloadFromForm())});
    }catch(e){toast(e.message||'Creazione API non riuscita','error');return}
  }
 
  const externalId=ext?(ext.id??ext.shipment_id??ext.spedizione_id):null;
  const tracking=ext?(ext.tracking??ext.tracking_number??ext.numero_tracking):q.name+localNum;
  const providerCost=ext?Number(ext.prezzo??ext.price??q.providerCost):q.providerCost;
- const status=ext?moovStatusToLocal(ext.stato??ext.status):'Presa in carico';
+ const status=ext?providerStatusToLocal(ext.stato??ext.status):'Presa in carico';
 
  const s={
    id:localNum,ownerId:owner.id,masterId:master?.id||null,
@@ -1152,7 +1275,7 @@ async function createShipment(q){
    carrier:q.name,status,providerCost:+providerCost.toFixed(2),masterCost:q.masterCost,clientPrice:q.clientPrice,price:q.clientPrice,cost:+providerCost.toFixed(2),
    cod:+qCod.value,insurance:+qInsurance.value>0,created:new Date().toISOString().slice(0,10),tracking,
    externalId,providerShipmentId:externalId,labelUrl:ext?.label_url||null,apiLinked:!!externalId,
-   events:[{status,date:new Date().toISOString().slice(0,10),note:ext?'Spedizione creata tramite API MoovExpress':'Spedizione demo creata sulla piattaforma'}]
+   events:[{status,date:new Date().toISOString().slice(0,10),note:ext?'Spedizione creata tramite API':'Spedizione demo creata sulla piattaforma'}]
  };
  state.shipments.unshift(s);
  owner.balance=+(owner.balance-q.clientPrice).toFixed(2);
@@ -1184,10 +1307,10 @@ async function doTracking(){
    if(h.online&&h.live){
      try{
        const d=await apiJson(`/api/tracking/${encodeURIComponent(s.carrier)}/${encodeURIComponent(s.tracking)}`);
-       s.status=moovStatusToLocal(d.status??d.stato??s.status);
+       s.status=providerStatusToLocal(d.status??d.stato??s.status);
        const events=d.events||d.eventi;
-       if(Array.isArray(events))s.events=events.map(x=>({status:moovStatusToLocal(x.status??x.stato??''),date:String(x.date||x.data||x.timestamp||new Date().toISOString()).slice(0,10),note:x.description||x.descrizione||x.location||x.localita||'Evento MoovExpress'}));
-       save();ensureAutomaticTickets();
+       if(Array.isArray(events))s.events=events.map(x=>({status:providerStatusToLocal(x.status??x.stato??''),date:String(x.date||x.data||x.timestamp||new Date().toISOString()).slice(0,10),note:x.description||x.descrizione||x.location||x.localita||'Evento tracking'}));
+       save();
      }catch(e){console.warn(e)}
    }
  }
